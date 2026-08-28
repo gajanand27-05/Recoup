@@ -1,0 +1,35 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Lint
+        run: ruff check src tests
+
+      # Fails the build if simulator/ has drifted from the freeze.
+      # Skipped until the freeze exists (Task 10, Day 2).
+      - name: Verify simulator freeze
+        run: |
+          if [ -f PARAMS.lock.json ]; then
+            make verify-sim
+          else
+            echo "no freeze yet (pre-Task-10) — skipping"
+          fi
+
+      - name: Test
+        run: pytest -v -m "not llm"

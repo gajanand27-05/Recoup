@@ -1,0 +1,14 @@
+# Makefiles are tab-and-LF sensitive; CRLF breaks them on the CI runner.
+Makefile        text eol=lf
+*.mk            text eol=lf
+*.sh            text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+
+# Normalise everything else to LF in the repository.
+*.py            text eol=lf
+*.toml          text eol=lf
+*.md            text eol=lf
+*.json          text eol=lf
+*.jsonl         text eol=lf
+*.j2            text eol=lf
