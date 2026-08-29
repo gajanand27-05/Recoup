@@ -73,3 +73,78 @@ A pin test that is never watched failing is an assumption wearing a test's cloth
 
 A test helper that only ever builds one row shape tests one row shape. The bug lived in the
 gap between what the helper produced and what the system would actually receive.
+
+---
+
+## INC-002 — A commit message that claimed a property the code did not have
+
+**2026-08-29 22:31 IST** · severity: medium (no runtime defect; a false claim, pushed) · status: fixed
+
+**What happened**
+
+Task 5 changed webhook dedupe from keyed-on-arrival to keyed-on-completion, so that only a
+`processed` event counts as a duplicate. The reasoning given, in commit `16b10ca` and in
+`DECISION.md` A-014, was that this stops events being lost when the process crashes with jobs
+still in the in-memory queue.
+
+It does not, and the reasoning was wrong on a point of fact about how Razorpay behaves.
+
+Redelivery only happens when Razorpay did **not** receive a 2xx. The ordering is: record the
+id, enqueue, ACK, worker runs, mark processed. The crash being defended against happens
+*after* the ACK — so Razorpay considers the event delivered and will never send it again.
+Nothing arrives to trigger the re-enqueue that `status='received'` was built to enable.
+
+The window redelivery genuinely covers is between the INSERT and the ACK: a few
+milliseconds, and largely the same window in which the row was never committed either. As a
+crash-recovery mechanism it was close to worthless.
+
+**Why this is logged as an incident and not a design note**
+
+Nothing broke at runtime. What was wrong is the claim, and the claim was already pushed to a
+public repository in a commit message. The code did roughly the right thing for a stated
+reason that did not hold, which means anyone reading the commit — including me, later — would
+have believed the hole was closed.
+
+A wrong explanation attached to correct-looking code is harder to catch than a bug, because
+it reads as considered. This project's entire argument is that its claims are checkable, so a
+commit message asserting a property the system lacks is exactly the failure it cannot afford.
+
+**How it was found**
+
+Code review. The reviewer traced the actual ordering of record → enqueue → ACK → crash and
+pointed out that the redelivery the design depended on would never arrive. Not by a test —
+every test passed, because the tests exercised redelivery directly rather than asking whether
+redelivery would ever happen.
+
+**Fix**
+
+`seen_events` now stores the raw body, and `sweep_unfinished()` re-enqueues every row still
+marked `received` at startup, before the server binds its socket. Recovery is performed by us
+from the durable record, not requested from Razorpay. The row was already being written; it
+simply was never read back.
+
+This also repairs the *rejection* recorded in A-014. Declining to build a durable job queue
+is now correct rather than merely convenient: `seen_events` already is one. Without the sweep
+it was only a record that work had been lost.
+
+Commit `191bb19`. `DECISION.md` A-014 carries a dated correction rather than a rewrite.
+
+**Verification**
+
+Not simulated. A server process was started, sent four webhooks, ACKed all four, then killed
+outright with `taskkill /F`. Restarted against the same database:
+
+```
+=== boot 1 ===
+  RECOVERED_ON_BOOT=0
+  sent evt_crash_0..3: 202 {'accepted': True, 'duplicate': False, 'redelivered': False}
+>>> taskkill /F. Razorpay already ACKed all 4. <<<
+=== boot 2, same database ===
+  RECOVERED_ON_BOOT=4  ->  ALL BACK
+```
+
+**Lesson kept**
+
+The tests proved the mechanism worked when triggered. Nobody had tested whether the trigger
+would ever fire. A mechanism verified only from the inside is an assumption about the outside
+world, and this one was wrong.
