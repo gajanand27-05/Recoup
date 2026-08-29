@@ -10,6 +10,7 @@ trail; it is a table.
 import hashlib
 import json
 import sqlite3
+from pathlib import Path
 from typing import Any
 
 GENESIS = "0" * 64
@@ -96,6 +97,12 @@ def compute_hash(prev_hash: str, row: dict) -> str:
 
 class Ledger:
     def __init__(self, db_path: str) -> None:
+        self.db_path = db_path
+        # `--db runs/recoup.db` should work without a preceding mkdir; otherwise
+        # the first thing a reader meets is an OperationalError about a path.
+        parent = Path(db_path).parent
+        if str(parent) not in ("", "."):
+            parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(db_path)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(_SCHEMA)
