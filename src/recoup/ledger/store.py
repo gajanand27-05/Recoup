@@ -14,7 +14,15 @@ from typing import Any
 
 GENESIS = "0" * 64
 
-# Fields hashed, in this order. Changing this list breaks every existing chain.
+# The fields folded into the hash. Adding or removing one breaks every existing
+# chain -- pinned by test_the_hash_of_a_known_row_never_changes.
+#
+# The ORDER here does not affect the hash: canonical_json sorts keys, so only
+# membership matters. The tuple is kept ordered for readability and pinned by
+# test_the_hashed_field_set_is_frozen, so a reordering still names itself in CI
+# rather than passing silently and implying order is load-bearing when it is not.
+#
+# To record something new, put it in `payload`. Do not extend this tuple.
 _HASHED_FIELDS = (
     "run_id",
     "ts",
@@ -63,9 +71,27 @@ def canonical_json(obj: Any) -> str:
     return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
-def compute_hash(prev_hash: str, row: dict) -> str:
+def _material(row: dict) -> dict:
+    """Project a row onto exactly the hashed fields, normalised.
+
+    Two callers reach this with different shapes: `append()` gets a caller-built
+    dict, `verify_chain()` gets a row out of `rows()` carrying seq/hash/prev_hash
+    and a payload that has been through JSON. Both must land on identical
+    material or the ledger accuses itself of tampering. Sharing one projection is
+    what makes that structural rather than a convention.
+
+    `payload` defaults to `{}` and not `None`, because `{}` is what gets stored.
+    """
     material = {k: row.get(k) for k in _HASHED_FIELDS}
-    return hashlib.sha256((prev_hash + canonical_json(material)).encode("utf-8")).hexdigest()
+    if material["payload"] is None:
+        material["payload"] = {}
+    return material
+
+
+def compute_hash(prev_hash: str, row: dict) -> str:
+    return hashlib.sha256(
+        (prev_hash + canonical_json(_material(row))).encode("utf-8")
+    ).hexdigest()
 
 
 class Ledger:
@@ -82,21 +108,25 @@ class Ledger:
 
     def append(self, row: dict) -> str:
         prev = self.head_hash()
-        h = compute_hash(prev, row)
+        # Store from the same projection that is hashed -- never from `row` directly.
+        material = _material(row)
+        h = hashlib.sha256(
+            (prev + canonical_json(material)).encode("utf-8")
+        ).hexdigest()
         self.conn.execute(
             """INSERT INTO ledger
                (run_id, ts, event_type, subscription_id, customer_id,
                 arm, transport, payload, prev_hash, hash)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                row["run_id"],
-                row["ts"],
-                row["event_type"],
-                row.get("subscription_id"),
-                row.get("customer_id"),
-                row.get("arm"),
-                row["transport"],
-                canonical_json(row.get("payload", {})),
+                material["run_id"],
+                material["ts"],
+                material["event_type"],
+                material["subscription_id"],
+                material["customer_id"],
+                material["arm"],
+                material["transport"],
+                canonical_json(material["payload"]),
                 prev,
                 h,
             ),
