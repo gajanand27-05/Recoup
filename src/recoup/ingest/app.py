@@ -45,16 +45,21 @@ is not.
 """
 
 import asyncio
+import json
 import sqlite3
-from pathlib import Path
+import threading
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Header, Request, Response
 
 from recoup.clock import utc_now_iso
 from recoup.ingest.signature import verify_signature
+from recoup.ledger.store import Ledger
 
 STATUS_RECEIVED = "received"
 STATUS_PROCESSED = "processed"
+
+TRANSPORTS = ("real", "sim")
 
 _SEEN_SCHEMA = """
 CREATE TABLE IF NOT EXISTS seen_events (
@@ -68,7 +73,143 @@ CREATE INDEX IF NOT EXISTS idx_seen_status ON seen_events(status);
 """
 
 
-def mark_processed(app: FastAPI, event_id: str) -> None:
+def _extract_ids(body: dict) -> tuple[str | None, str | None]:
+    """Pull subscription and customer ids out of any of the shapes we accept.
+
+    Razorpay nests differently per event type, so this stays tolerant: a missing
+    id is None, never an exception. Ordering is not guaranteed and neither is
+    payload shape across event types, and an unrecognised shape must never cost
+    us the audit row.
+    """
+    payload = body.get("payload") or {}
+    for key in ("subscription", "payment", "payment_link"):
+        entity = (payload.get(key) or {}).get("entity")
+        if entity:
+            return entity.get("id"), entity.get("customer_id")
+    return None, None
+
+
+def _to_ledger_row(raw: bytes, event_id: str, *, run_id: str, transport: str) -> dict:
+    """Build the `webhook.received` row.
+
+    The signature proves these bytes came from Razorpay. It does not prove they
+    parse, so a body that is not JSON is still recorded -- losing the audit row
+    for a malformed event is worse than recording that it was malformed.
+    """
+    try:
+        body = json.loads(raw)
+        if not isinstance(body, dict):
+            raise ValueError("top-level JSON is not an object")
+    except (ValueError, UnicodeDecodeError):
+        return {
+            "run_id": run_id,
+            "ts": utc_now_iso(),
+            "event_type": "webhook.received",
+            "subscription_id": None,
+            "customer_id": None,
+            "arm": None,
+            "transport": transport,
+            "payload": {
+                "event": None,
+                "event_id": event_id,
+                "unparseable": True,
+                "raw_utf8": raw.decode("utf-8", errors="replace"),
+            },
+        }
+
+    sub_id, cust_id = _extract_ids(body)
+    return {
+        "run_id": run_id,
+        "ts": utc_now_iso(),
+        "event_type": "webhook.received",
+        "subscription_id": sub_id,
+        "customer_id": cust_id,
+        "arm": None,
+        "transport": transport,
+        "payload": {"event": body.get("event"), "event_id": event_id, "body": body},
+    }
+
+
+def process_one(app: FastAPI, job: dict) -> str | None:
+    """Write one queued webhook to the ledger. Returns the row hash, or None if
+    the event was already recorded.
+
+    The ledger append and the status update go through ONE connection and ONE
+    commit. A half-applied event is the only outcome that must be impossible:
+    a committed row with an uncommitted status would be replayed by the next
+    sweep into a duplicate, and a committed status with an uncommitted row would
+    mark the event done with its audit record missing.
+    """
+    conn = app.state.conn
+    event_id = job["event_id"]
+
+    with app.state.lock:
+        row = conn.execute(
+            "SELECT status FROM seen_events WHERE event_id = ?", (event_id,)
+        ).fetchone()
+        if row is not None and row[0] == STATUS_PROCESSED:
+            return None  # a recovery replay of work already durably recorded
+
+        record = _to_ledger_row(
+            job["raw"], event_id, run_id=app.state.run_id, transport=app.state.transport
+        )
+        try:
+            h = app.state.ledger.append(record, commit=False)
+            mark_processed(app, event_id, commit=False)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+    return h
+
+
+def drain(app: FastAPI) -> int:
+    """Process every queued job now. Returns how many ledger rows were written.
+
+    Used by the startup path and by tests, where a background worker would make
+    assertions race the thing they are asserting about.
+    """
+    written = 0
+    while True:
+        try:
+            job = app.state.queue.get_nowait()
+        except asyncio.QueueEmpty:
+            return written
+        if process_one(app, job) is not None:
+            written += 1
+
+
+async def _worker(app: FastAPI) -> None:
+    """Drain the queue for as long as the server runs.
+
+    This is what calls mark_processed() in production. Without it the ACK path
+    would record every event as `received` and never advance it, so the startup
+    sweep would replay the entire history on every boot -- dedupe failing in the
+    opposite direction, and just as silently.
+    """
+    queue: asyncio.Queue = app.state.queue
+    while True:
+        job = await queue.get()
+        try:
+            process_one(app, job)
+        except Exception as exc:  # noqa: BLE001 - a bad event must not kill the worker
+            app.state.worker_errors.append((job.get("event_id"), repr(exc)))
+        finally:
+            queue.task_done()
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    app.state.worker_task = asyncio.create_task(_worker(app))
+    try:
+        yield
+    finally:
+        app.state.worker_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await app.state.worker_task
+
+
+def mark_processed(app: FastAPI, event_id: str, *, commit: bool = True) -> None:
     """Called by the worker once an event is durably handled.
 
     Until this runs the event is recoverable: a redelivery re-enqueues it, and so
@@ -79,7 +220,8 @@ def mark_processed(app: FastAPI, event_id: str) -> None:
         "UPDATE seen_events SET status = ? WHERE event_id = ?",
         (STATUS_PROCESSED, event_id),
     )
-    app.state.conn.commit()
+    if commit:
+        app.state.conn.commit()
 
 
 def sweep_unfinished(app: FastAPI) -> int:
@@ -118,14 +260,42 @@ def _assert_schema_is_current(conn: sqlite3.Connection) -> None:
         )
 
 
-def create_app(db_path: str, webhook_secret: str) -> FastAPI:
-    app = FastAPI(title="recoup ingest")
-    app.state.queue = asyncio.Queue()
+def create_app(
+    db_path: str,
+    webhook_secret: str,
+    *,
+    run_id: str = "first-light",
+    transport: str = "sim",
+) -> FastAPI:
+    """Build the ingest app.
 
-    parent = Path(db_path).parent
-    if str(parent) not in ("", "."):
-        parent.mkdir(parents=True, exist_ok=True)
-    app.state.conn = sqlite3.connect(db_path, check_same_thread=False)
+    `transport` must be declared and is NOT inferred. The handler cannot tell a
+    live Razorpay webhook from a replayed fixture -- the bytes are identical by
+    design, that being the point of a fixture. `real` and `sim` are never pooled
+    in any reported number, so the value has to come from whoever knows.
+
+    It defaults to `sim` because the two mistakes are not symmetric. Labelling a
+    fixture `real` manufactures evidence that the system ran against Razorpay.
+    Labelling a real event `sim` only forfeits a claim we were entitled to make.
+    Default to the error that costs us something rather than the one that costs
+    the reader something.
+    """
+    if transport not in TRANSPORTS:
+        raise ValueError(f"transport must be one of {TRANSPORTS}, got {transport!r}")
+
+    app = FastAPI(title="recoup ingest", lifespan=_lifespan)
+    app.state.queue = asyncio.Queue()
+    app.state.run_id = run_id
+    app.state.transport = transport
+    app.state.worker_errors: list[tuple[str | None, str]] = []
+
+    # One connection for the ledger AND seen_events, so the worker can commit a
+    # ledger row and its status update together. Two connections could not.
+    app.state.ledger = Ledger(db_path, check_same_thread=False)
+    app.state.conn = app.state.ledger.conn
+    # Starlette may run the handler on a different thread than the worker, and
+    # they now share one connection. Serialise every write through this.
+    app.state.lock = threading.Lock()
     _assert_schema_is_current(app.state.conn)
     app.state.conn.executescript(_SEEN_SCHEMA)
     app.state.conn.commit()
@@ -161,12 +331,13 @@ def create_app(db_path: str, webhook_secret: str) -> FastAPI:
 
         # INSERT OR IGNORE is atomic, so two concurrent deliveries of the same id
         # cannot both be treated as first. rowcount tells us which one won.
-        cur = app.state.conn.execute(
-            "INSERT OR IGNORE INTO seen_events (event_id, first_seen, status, raw) "
-            "VALUES (?, ?, ?, ?)",
-            (x_razorpay_event_id, utc_now_iso(), STATUS_RECEIVED, raw),
-        )
-        app.state.conn.commit()
+        with app.state.lock:
+            cur = app.state.conn.execute(
+                "INSERT OR IGNORE INTO seen_events (event_id, first_seen, status, raw) "
+                "VALUES (?, ?, ?, ?)",
+                (x_razorpay_event_id, utc_now_iso(), STATUS_RECEIVED, raw),
+            )
+            app.state.conn.commit()
 
         if cur.rowcount == 1:
             # The row is committed before the enqueue, so a crash here leaves the
@@ -176,9 +347,10 @@ def create_app(db_path: str, webhook_secret: str) -> FastAPI:
             )
             return {"accepted": True, "duplicate": False, "redelivered": False}
 
-        row = app.state.conn.execute(
-            "SELECT status FROM seen_events WHERE event_id = ?", (x_razorpay_event_id,)
-        ).fetchone()
+        with app.state.lock:
+            row = app.state.conn.execute(
+                "SELECT status FROM seen_events WHERE event_id = ?", (x_razorpay_event_id,)
+            ).fetchone()
 
         if row is not None and row[0] == STATUS_PROCESSED:
             # Genuinely done. ACK so Razorpay stops retrying.

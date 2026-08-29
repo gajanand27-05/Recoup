@@ -96,14 +96,19 @@ def compute_hash(prev_hash: str, row: dict) -> str:
 
 
 class Ledger:
-    def __init__(self, db_path: str) -> None:
+    def __init__(self, db_path: str, *, check_same_thread: bool = True) -> None:
+        """`check_same_thread=False` is needed by the ingest, where Starlette may
+        run the handler on a different thread than the one that built the app.
+        Callers that share a connection across threads must serialise their own
+        writes -- the ingest does this with a lock.
+        """
         self.db_path = db_path
         # `--db runs/recoup.db` should work without a preceding mkdir; otherwise
         # the first thing a reader meets is an OperationalError about a path.
         parent = Path(db_path).parent
         if str(parent) not in ("", "."):
             parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(db_path)
+        self.conn = sqlite3.connect(db_path, check_same_thread=check_same_thread)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(_SCHEMA)
         self.conn.commit()
@@ -113,7 +118,15 @@ class Ledger:
         row = cur.fetchone()
         return row["hash"] if row else GENESIS
 
-    def append(self, row: dict) -> str:
+    def append(self, row: dict, *, commit: bool = True) -> str:
+        """Append a row and return its hash.
+
+        `commit=False` leaves the INSERT in the caller's open transaction, so a
+        write to another table on this same connection can land atomically with
+        it. The caller then owns the commit and the rollback. Used by the ingest
+        worker, where a ledger row without its matching status update would be
+        replayed into a duplicate.
+        """
         prev = self.head_hash()
         # Store from the same projection that is hashed -- never from `row` directly.
         material = _material(row)
@@ -138,7 +151,8 @@ class Ledger:
                 h,
             ),
         )
-        self.conn.commit()
+        if commit:
+            self.conn.commit()
         return h
 
     def rows(self, run_id: str | None = None) -> list[dict]:
