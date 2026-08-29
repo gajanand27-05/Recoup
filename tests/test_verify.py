@@ -82,6 +82,21 @@ def test_a_deleted_row_is_caught(ledger):
 
 
 def test_tail_truncation_is_invisible_to_the_chain(ledger):
+    """PINS A KNOWN LIMITATION. This is not asserting desired behaviour.
+
+    `ok is True` on a truncated ledger is the gap, not the goal. The assertion
+    exists so the limitation cannot quietly stop being true.
+
+    If this test goes RED, do not adjust the assertion. It means the chain's
+    detection properties changed, and three things need revisiting together:
+      1. the module docstring in ledger/verify.py
+      2. the limitations section of README.md
+      3. whether `--expect-head` is still the thing that closes the gap
+
+    What closes it today is the external anchor: see
+    test_the_anchor_catches_tail_truncation directly below, which is the same
+    scenario with a committed head to compare against.
+    """
     full_head = ledger.head_hash()
     ledger.conn.execute("DROP TRIGGER ledger_no_delete")
     ledger.conn.execute("DELETE FROM ledger WHERE seq > 3")
