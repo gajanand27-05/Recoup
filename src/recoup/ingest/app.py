@@ -14,16 +14,34 @@ The obvious implementation records an event id on arrival and treats every later
 delivery of that id as a duplicate. That loses events. The queue is in memory, so
 if the process dies between recording the id and the worker finishing the work,
 the job is gone -- and the record that says "already seen" is exactly what stops
-Razorpay's retry from bringing it back.
+a retry from bringing it back.
 
-The loss is silent, unrecoverable, and happens under the same crash that destroys
-the logs that would explain it.
+So `seen_events` carries a status. Only a `processed` event is a duplicate.
 
-So `seen_events` carries a status. Only a `processed` event is a duplicate. An
-event still marked `received` is re-enqueued on redelivery. That can process an
-event twice, which is safe by construction: delivery is at-least-once and
-unordered, so every state transition downstream has to be idempotent and
-commutative regardless. Doing work twice is recoverable. Losing it is not.
+Recovery is OURS to perform, not Razorpay's
+-------------------------------------------
+It is tempting to stop there and assume redelivery closes the hole. It does not.
+Razorpay only retries an event it did not get a 2xx for, and the crash that
+matters -- the process dying with jobs still in the queue -- happens *after* the
+ACK. Those events are delivered as far as Razorpay is concerned and will never
+arrive again. Nothing comes back to trigger a re-enqueue.
+
+The window redelivery actually covers is between the INSERT and the ACK: a few
+milliseconds, and largely the same window in which the row was never committed
+either. As a recovery mechanism it is close to worthless.
+
+What makes `status` load-bearing is `sweep_unfinished()`, run at startup before
+the server accepts traffic: every row still marked `received` is re-enqueued from
+the durable record we already wrote. `seen_events` stores the raw body precisely
+so this is possible -- an id alone cannot be re-executed.
+
+That is why no separate durable job queue is needed: `seen_events` already is
+one. Without the sweep it would only be a record that work was lost.
+
+Both paths can process an event twice. That is safe by construction: delivery is
+at-least-once and unordered, so every downstream state transition has to be
+idempotent and commutative regardless. Doing work twice is recoverable. Losing it
+is not.
 """
 
 import asyncio
@@ -42,22 +60,62 @@ _SEEN_SCHEMA = """
 CREATE TABLE IF NOT EXISTS seen_events (
     event_id   TEXT PRIMARY KEY,
     first_seen TEXT NOT NULL,
-    status     TEXT NOT NULL CHECK (status IN ('received', 'processed'))
+    status     TEXT NOT NULL CHECK (status IN ('received', 'processed')),
+    raw        BLOB NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_seen_status ON seen_events(status);
 """
 
 
 def mark_processed(app: FastAPI, event_id: str) -> None:
     """Called by the worker once an event is durably handled.
 
-    Until this runs, a redelivery of the same id is re-enqueued rather than
-    discarded. This is the only thing that makes an id a duplicate.
+    Until this runs the event is recoverable: a redelivery re-enqueues it, and so
+    does the next startup sweep. This call is the only thing that makes an id a
+    duplicate, so a worker that forgets it leaves every event replaying forever.
     """
     app.state.conn.execute(
         "UPDATE seen_events SET status = ? WHERE event_id = ?",
         (STATUS_PROCESSED, event_id),
     )
     app.state.conn.commit()
+
+
+def sweep_unfinished(app: FastAPI) -> int:
+    """Re-enqueue every event recorded but never marked processed. Returns the count.
+
+    This is the actual crash recovery. It must run before the server accepts
+    traffic: a sweep racing an inbound redelivery double-enqueues, which is
+    harmless given idempotency but muddies the log at exactly the moment someone
+    is reading it to find out what the crash did.
+
+    Re-running it re-enqueues the same rows again. Deliberate -- the alternative
+    is tracking in-flight state in memory, which is the thing that just died.
+    """
+    rows = app.state.conn.execute(
+        "SELECT event_id, raw FROM seen_events WHERE status = ? ORDER BY first_seen",
+        (STATUS_RECEIVED,),
+    ).fetchall()
+    for event_id, raw in rows:
+        app.state.queue.put_nowait(
+            {"event_id": event_id, "raw": bytes(raw), "recovered": True}
+        )
+    return len(rows)
+
+
+def _assert_schema_is_current(conn: sqlite3.Connection) -> None:
+    """Fail loudly on a pre-`raw` database instead of obscurely later.
+
+    CREATE TABLE IF NOT EXISTS silently accepts an older table, and the first
+    symptom would be a sweep that recovers nothing.
+    """
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(seen_events)")}
+    if cols and "raw" not in cols:
+        raise RuntimeError(
+            "seen_events predates the `raw` column, so crashed jobs cannot be "
+            "recovered. Delete the database and start a new run."
+        )
 
 
 def create_app(db_path: str, webhook_secret: str) -> FastAPI:
@@ -68,8 +126,13 @@ def create_app(db_path: str, webhook_secret: str) -> FastAPI:
     if str(parent) not in ("", "."):
         parent.mkdir(parents=True, exist_ok=True)
     app.state.conn = sqlite3.connect(db_path, check_same_thread=False)
+    _assert_schema_is_current(app.state.conn)
     app.state.conn.executescript(_SEEN_SCHEMA)
     app.state.conn.commit()
+
+    # Before anything can be served. create_app() returns to the caller who then
+    # hands the app to uvicorn, so recovery is complete before the socket binds.
+    app.state.recovered_on_boot = sweep_unfinished(app)
 
     @app.get("/health")
     async def health() -> dict:
@@ -99,13 +162,18 @@ def create_app(db_path: str, webhook_secret: str) -> FastAPI:
         # INSERT OR IGNORE is atomic, so two concurrent deliveries of the same id
         # cannot both be treated as first. rowcount tells us which one won.
         cur = app.state.conn.execute(
-            "INSERT OR IGNORE INTO seen_events (event_id, first_seen, status) VALUES (?, ?, ?)",
-            (x_razorpay_event_id, utc_now_iso(), STATUS_RECEIVED),
+            "INSERT OR IGNORE INTO seen_events (event_id, first_seen, status, raw) "
+            "VALUES (?, ?, ?, ?)",
+            (x_razorpay_event_id, utc_now_iso(), STATUS_RECEIVED, raw),
         )
         app.state.conn.commit()
 
         if cur.rowcount == 1:
-            await app.state.queue.put({"event_id": x_razorpay_event_id, "raw": raw})
+            # The row is committed before the enqueue, so a crash here leaves the
+            # job recoverable by the next sweep rather than lost with the queue.
+            await app.state.queue.put(
+                {"event_id": x_razorpay_event_id, "raw": raw, "recovered": False}
+            )
             return {"accepted": True, "duplicate": False, "redelivered": False}
 
         row = app.state.conn.execute(
@@ -116,9 +184,13 @@ def create_app(db_path: str, webhook_secret: str) -> FastAPI:
             # Genuinely done. ACK so Razorpay stops retrying.
             return {"accepted": True, "duplicate": True, "redelivered": False}
 
-        # Seen but never finished -- in flight, or lost with a crashed process.
-        # Re-enqueue. Duplicate work is safe; a dropped event is not.
-        await app.state.queue.put({"event_id": x_razorpay_event_id, "raw": raw})
+        # Seen but never finished. Almost always still in flight -- a crashed job
+        # is recovered by the startup sweep, not by this path, because Razorpay
+        # will not redeliver an event it already got a 2xx for. Re-enqueue anyway:
+        # duplicate work is safe, and a dropped event is not.
+        await app.state.queue.put(
+            {"event_id": x_razorpay_event_id, "raw": raw, "recovered": False}
+        )
         return {"accepted": True, "duplicate": False, "redelivered": True}
 
     return app

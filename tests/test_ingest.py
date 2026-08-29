@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from recoup.clock import utc_now_iso
-from recoup.ingest.app import create_app, mark_processed
+from recoup.ingest.app import create_app, mark_processed, sweep_unfinished
 
 SECRET = "whsec_test_123"
 
@@ -207,6 +207,105 @@ def test_a_processed_event_is_never_redelivered(client, app):
         assert r.status_code == 202
         assert r.json()["duplicate"] is True
     assert app.state.queue.qsize() == 0
+
+
+# --- crash recovery: the startup sweep ---------------------------------------
+# Redelivery does NOT rescue a crashed job. Razorpay only retries when it did not
+# get a 2xx, and the crash we care about -- process dies with jobs in the
+# in-memory queue -- happens AFTER the ACK. That event is delivered as far as
+# Razorpay is concerned and will never be sent again.
+#
+# So `status` is only load-bearing if we read it back ourselves. On boot, every
+# row still marked `received` is re-enqueued locally. That makes seen_events the
+# durable job queue, which is why a separate one is not needed -- but only with
+# the sweep. Without it the status column is a record of a hole, not a fix.
+
+
+def test_the_raw_body_is_stored_so_recovery_is_possible(client, db_path):
+    raw = json.dumps(HALTED).encode()
+    sig = hmac.new(SECRET.encode(), raw, hashlib.sha256).hexdigest()
+    client.post(
+        "/webhook",
+        content=raw,
+        headers={"X-Razorpay-Signature": sig, "x-razorpay-event-id": "evt_stored"},
+    )
+    conn = sqlite3.connect(db_path)
+    stored = conn.execute(
+        "SELECT raw FROM seen_events WHERE event_id = ?", ("evt_stored",)
+    ).fetchone()[0]
+    assert bytes(stored) == raw, "cannot re-enqueue a job whose body was never kept"
+
+
+def test_a_crashed_job_is_recovered_on_the_next_boot(db_path):
+    app1 = create_app(db_path=db_path, webhook_secret=SECRET)
+    c1 = TestClient(app1)
+    raw = json.dumps(HALTED).encode()
+    sig = hmac.new(SECRET.encode(), raw, hashlib.sha256).hexdigest()
+    for eid in ("evt_lost_1", "evt_lost_2"):
+        c1.post(
+            "/webhook",
+            content=raw,
+            headers={"X-Razorpay-Signature": sig, "x-razorpay-event-id": eid},
+        )
+    assert app1.state.queue.qsize() == 2
+
+    # The process dies. The queue evaporates; the rows survive. Razorpay got its
+    # 202 for both and will never send them again.
+    del app1, c1
+
+    app2 = create_app(db_path=db_path, webhook_secret=SECRET)
+    assert app2.state.queue.qsize() == 2, "unfinished work must come back on boot"
+
+    recovered = [app2.state.queue.get_nowait() for _ in range(2)]
+    assert {j["event_id"] for j in recovered} == {"evt_lost_1", "evt_lost_2"}
+    assert all(j["raw"] == raw for j in recovered)
+    assert all(j["recovered"] is True for j in recovered)
+
+
+def test_the_sweep_runs_before_the_server_accepts_traffic(db_path):
+    # Recovery must be complete by the time create_app() returns. A sweep racing
+    # an incoming request is harmless given idempotency, but it double-enqueues
+    # at exactly the moment someone is reading the logs to find out what happened.
+    app1 = create_app(db_path=db_path, webhook_secret=SECRET)
+    _post(TestClient(app1), {"event": "subscription.halted"}, "evt_boot")
+
+    app2 = create_app(db_path=db_path, webhook_secret=SECRET)
+    assert app2.state.queue.qsize() == 1  # already done, not scheduled
+
+
+def test_the_sweep_skips_finished_work(db_path):
+    app1 = create_app(db_path=db_path, webhook_secret=SECRET)
+    c1 = TestClient(app1)
+    _post(c1, {"event": "subscription.halted"}, "evt_done_1")
+    _post(c1, {"event": "subscription.halted"}, "evt_open_1")
+    mark_processed(app1, "evt_done_1")
+
+    app2 = create_app(db_path=db_path, webhook_secret=SECRET)
+    assert app2.state.queue.qsize() == 1
+    assert app2.state.queue.get_nowait()["event_id"] == "evt_open_1"
+
+
+def test_sweep_reports_how_much_it_recovered(db_path):
+    app1 = create_app(db_path=db_path, webhook_secret=SECRET)
+    c1 = TestClient(app1)
+    for i in range(3):
+        _post(c1, {"event": "subscription.halted"}, f"evt_n_{i}")
+    mark_processed(app1, "evt_n_0")
+
+    app2 = create_app(db_path=db_path, webhook_secret=SECRET)
+    assert sweep_unfinished(app2) == 2  # idempotent: re-running finds the same rows
+
+
+def test_a_repeated_sweep_does_not_lose_the_backlog(db_path):
+    # Sweeping twice enqueues twice. That is safe (transitions are idempotent) and
+    # is asserted so the behaviour is a known property, not a surprise.
+    app1 = create_app(db_path=db_path, webhook_secret=SECRET)
+    _post(TestClient(app1), {"event": "subscription.halted"}, "evt_twice")
+
+    app2 = create_app(db_path=db_path, webhook_secret=SECRET)
+    assert app2.state.queue.qsize() == 1
+    sweep_unfinished(app2)
+    assert app2.state.queue.qsize() == 2
 
 
 def test_dedupe_survives_a_restart(db_path):
