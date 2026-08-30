@@ -6,7 +6,15 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from recoup.ingest.app import STATUS_RECEIVED, create_app, drain, process_one
+from recoup.ingest.app import (
+    MAX_ATTEMPTS,
+    STATUS_RECEIVED,
+    create_app,
+    drain,
+    failed_events,
+    process_one,
+    sweep_unfinished,
+)
 from recoup.ledger.store import Ledger
 from recoup.ledger.verify import verify_chain
 
@@ -287,6 +295,104 @@ def test_a_worker_failure_does_not_kill_the_worker(tmp_path, monkeypatch):
 
     assert len(Ledger(db).rows()) == 1, "the second event still got through"
     assert app.state.worker_errors and app.state.worker_errors[0][0] == "evt_fl_boom"
+
+
+# --- poison jobs --------------------------------------------------------------
+# A job that always explodes has two bad resting places. Left `received`, it is
+# re-enqueued by every startup sweep and re-fires forever. Marked `processed` on
+# failure, the event vanishes with no record -- the same short-denominator
+# problem the status column exists to prevent, and at N=2,000 one malformed
+# payload quietly costs a subscription from the sample.
+#
+# So: a bounded attempt counter and a terminal `failed` status that the sweep
+# skips and the report has to account for. Giving up is allowed. Giving up
+# silently is not.
+
+
+def _always_explodes(monkeypatch):
+    import recoup.ingest.app as appmod
+
+    def boom(*a, **kw):
+        raise RuntimeError("this payload will never work")
+
+    monkeypatch.setattr(appmod, "_to_ledger_row", boom)
+
+
+def test_a_poison_job_stops_re_firing_after_a_bounded_number_of_attempts(
+    tmp_path, monkeypatch
+):
+    db = str(tmp_path / "poison.db")
+    _always_explodes(monkeypatch)
+
+    app = create_app(db_path=db, webhook_secret=SECRET)
+    _send(TestClient(app), HALTED, "evt_poison")
+
+    boots = 0
+    for _ in range(MAX_ATTEMPTS + 5):
+        app2 = create_app(db_path=db, webhook_secret=SECRET)
+        if app2.state.recovered_on_boot == 0:
+            break
+        boots += 1
+        with pytest.raises(RuntimeError):
+            drain(app2)
+
+    assert boots == MAX_ATTEMPTS, (
+        f"the sweep should stop re-enqueueing after {MAX_ATTEMPTS} attempts; it "
+        f"re-fired on {boots} boots"
+    )
+    assert create_app(db_path=db, webhook_secret=SECRET).state.recovered_on_boot == 0
+
+
+def test_a_given_up_event_is_visible_not_silently_dropped(tmp_path, monkeypatch):
+    db = str(tmp_path / "visible.db")
+    _always_explodes(monkeypatch)
+
+    app = create_app(db_path=db, webhook_secret=SECRET)
+    _send(TestClient(app), HALTED, "evt_gaveup")
+    for _ in range(MAX_ATTEMPTS):
+        with pytest.raises(RuntimeError):
+            drain(app)
+        sweep_unfinished(app)
+
+    failed = failed_events(app)
+    assert [e["event_id"] for e in failed] == ["evt_gaveup"]
+    assert failed[0]["attempts"] >= MAX_ATTEMPTS
+    assert Ledger(db).rows() == [], "nothing was written, and that is recorded"
+
+
+def test_a_transient_failure_still_succeeds_on_a_later_attempt(tmp_path, monkeypatch):
+    # The cap must not turn a blip into a permanent loss.
+    db = str(tmp_path / "transient.db")
+    import recoup.ingest.app as appmod
+
+    real = appmod._to_ledger_row
+    calls = {"n": 0}
+
+    def flaky(*a, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("transient")
+        return real(*a, **kw)
+
+    monkeypatch.setattr(appmod, "_to_ledger_row", flaky)
+
+    app = create_app(db_path=db, webhook_secret=SECRET)
+    _send(TestClient(app), HALTED, "evt_blip")
+    with pytest.raises(RuntimeError):
+        drain(app)
+
+    app2 = create_app(db_path=db, webhook_secret=SECRET)
+    assert app2.state.recovered_on_boot == 1
+    assert drain(app2) == 1
+    assert len(Ledger(db).rows()) == 1
+    assert failed_events(app2) == []
+
+
+def test_a_healthy_run_reports_no_failures(env):
+    client, db, app = env
+    _send(client, HALTED, "evt_fine")
+    drain(app)
+    assert failed_events(app) == []
 
 
 def test_draining_marks_processed_so_the_sweep_stops_replaying(env):

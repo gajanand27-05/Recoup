@@ -21,7 +21,7 @@ import os
 import uvicorn
 
 from recoup.config import settings
-from recoup.ingest.app import create_app
+from recoup.ingest.app import MAX_ATTEMPTS, create_app, failed_events
 
 app = create_app(
     db_path=settings.db_path,
@@ -39,4 +39,14 @@ if __name__ == "__main__":
         )
     print(f"run_id={app.state.run_id} transport={app.state.transport}")
     print(f"recovered on boot: {app.state.recovered_on_boot} unfinished event(s)")
+
+    gave_up = failed_events(app)
+    if gave_up:
+        # These never reached the ledger. Any rate computed as though they had is
+        # wrong, so they get announced rather than left in a column nobody reads.
+        print(f"\n!! {len(gave_up)} event(s) GIVEN UP after {MAX_ATTEMPTS} attempts:")
+        for e in gave_up:
+            print(f"   {e['event_id']}  {e['attempts']}x  {e['last_error']}")
+        print("   the denominator for this run is short by that many. Report it.\n")
+
     uvicorn.run(app, host="0.0.0.0", port=8000)

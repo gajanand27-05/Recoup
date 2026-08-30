@@ -58,15 +58,29 @@ from recoup.ledger.store import Ledger
 
 STATUS_RECEIVED = "received"
 STATUS_PROCESSED = "processed"
+STATUS_FAILED = "failed"
 
 TRANSPORTS = ("real", "sim")
+
+# A job that always explodes has two bad resting places. Left `received`, the
+# startup sweep re-enqueues it every boot and it re-fires forever. Marked
+# `processed` on failure, the event disappears with no record -- the same short
+# denominator the status column exists to prevent, and at N=2,000 one malformed
+# payload quietly costs a subscription from the sample.
+#
+# Neither. Attempts are counted, and after MAX_ATTEMPTS the event moves to the
+# terminal `failed` status, which the sweep skips and the report must account
+# for. Giving up is allowed; giving up silently is not.
+MAX_ATTEMPTS = 3
 
 _SEEN_SCHEMA = """
 CREATE TABLE IF NOT EXISTS seen_events (
     event_id   TEXT PRIMARY KEY,
     first_seen TEXT NOT NULL,
-    status     TEXT NOT NULL CHECK (status IN ('received', 'processed')),
-    raw        BLOB NOT NULL
+    status     TEXT NOT NULL CHECK (status IN ('received', 'processed', 'failed')),
+    raw        BLOB NOT NULL,
+    attempts   INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_seen_status ON seen_events(status);
@@ -150,17 +164,62 @@ def process_one(app: FastAPI, job: dict) -> str | None:
         if row is not None and row[0] == STATUS_PROCESSED:
             return None  # a recovery replay of work already durably recorded
 
-        record = _to_ledger_row(
-            job["raw"], event_id, run_id=app.state.run_id, transport=app.state.transport
-        )
         try:
+            # Inside the try: building the row is where a malformed payload fails,
+            # which is the poison case the attempt counter exists for.
+            record = _to_ledger_row(
+                job["raw"],
+                event_id,
+                run_id=app.state.run_id,
+                transport=app.state.transport,
+            )
             h = app.state.ledger.append(record, commit=False)
             mark_processed(app, event_id, commit=False)
             conn.commit()
-        except Exception:
+        except Exception as exc:
             conn.rollback()
+            _record_attempt_failure(app, event_id, exc)
             raise
     return h
+
+
+def _record_attempt_failure(app: FastAPI, event_id: str, exc: BaseException) -> int:
+    """Count a failed attempt and retire the event once it has had enough.
+
+    Runs in its own committed transaction, after the rollback, because the point
+    is to persist the fact that the work did NOT happen.
+    """
+    conn = app.state.conn
+    conn.execute(
+        "UPDATE seen_events SET attempts = attempts + 1, last_error = ? WHERE event_id = ?",
+        (repr(exc)[:500], event_id),
+    )
+    attempts = conn.execute(
+        "SELECT attempts FROM seen_events WHERE event_id = ?", (event_id,)
+    ).fetchone()[0]
+    if attempts >= MAX_ATTEMPTS:
+        conn.execute(
+            "UPDATE seen_events SET status = ? WHERE event_id = ?",
+            (STATUS_FAILED, event_id),
+        )
+    conn.commit()
+    return attempts
+
+
+def failed_events(app: FastAPI) -> list[dict]:
+    """Events this run gave up on. Must appear in the report.
+
+    A non-empty result means the denominator is short: those subscriptions never
+    reached the ledger, so any rate computed as if they had is wrong.
+    """
+    return [
+        {"event_id": r[0], "attempts": r[1], "last_error": r[2], "first_seen": r[3]}
+        for r in app.state.conn.execute(
+            "SELECT event_id, attempts, last_error, first_seen FROM seen_events "
+            "WHERE status = ? ORDER BY first_seen",
+            (STATUS_FAILED,),
+        )
+    ]
 
 
 def drain(app: FastAPI) -> int:
@@ -253,10 +312,12 @@ def _assert_schema_is_current(conn: sqlite3.Connection) -> None:
     symptom would be a sweep that recovers nothing.
     """
     cols = {r[1] for r in conn.execute("PRAGMA table_info(seen_events)")}
-    if cols and "raw" not in cols:
+    missing = {"raw", "attempts"} - cols
+    if cols and missing:
         raise RuntimeError(
-            "seen_events predates the `raw` column, so crashed jobs cannot be "
-            "recovered. Delete the database and start a new run."
+            f"seen_events is missing {sorted(missing)}. Without `raw` crashed jobs "
+            "cannot be recovered; without `attempts` a poison job re-fires on every "
+            "boot. Delete the database and start a new run."
         )
 
 
