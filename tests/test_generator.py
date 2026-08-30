@@ -7,10 +7,16 @@ from recoup.simulator.generator import (
     HARD_DECLINE_CODES,
     PARAMS,
     REASON_MIX,
+    RESIDUAL_HARD_FRACTION,
     UNREGISTERED_OK,
     generate_scenarios,
 )
-from recoup.simulator.provenance import params_problems, unregistered_constants
+from recoup.simulator.provenance import (
+    params_problems,
+    unread_assumptions,
+    unregistered_constants,
+    unregistered_literals,
+)
 
 # --- determinism --------------------------------------------------------------
 
@@ -102,13 +108,48 @@ def test_hard_decline_flag_matches_the_reason_code():
         assert s.is_hard_decline == (s.reason_code in HARD_DECLINE_CODES)
 
 
-def test_the_residual_bucket_is_treated_as_soft_and_that_is_declared():
+def test_the_residual_bucket_defaults_to_soft_and_that_is_declared():
     # Six hard-decline codes (lost_card, stolen_card, ...) never appear in the
-    # Churnkey table and so live inside `other`, which is modelled as entirely
-    # soft. That is an assumption, and it must be registered as one rather than
-    # inherited from the shape of the table.
+    # Churnkey table and so live inside `other`, which defaults to soft. That is
+    # an assumption, registered rather than inherited from the table's shape.
     assert "other" not in HARD_DECLINE_CODES
-    assert PARAMS["residual_bucket_is_soft"]["class"] == "ASSUMPTION"
+    assert PARAMS["residual_hard_fraction"]["class"] == "ASSUMPTION"
+    assert RESIDUAL_HARD_FRACTION == 0.0
+
+
+def test_the_residual_hard_fraction_actually_moves_the_model(monkeypatch):
+    """A swept parameter nothing reads reports INSENSITIVE and proves nothing.
+
+    This one was declared with a sweep and implemented nowhere. The sensitivity
+    analysis would have varied it across 0-30%, seen an identical result every
+    time, and recorded robustness that had never been tested.
+    """
+    base = sum(s.is_hard_decline for s in generate_scenarios(n=20000, seed=31))
+    monkeypatch.setattr(gen_mod, "RESIDUAL_HARD_FRACTION", 0.30)
+    swept = sum(s.is_hard_decline for s in generate_scenarios(n=20000, seed=31))
+    assert swept > base, "sweeping this parameter must change the generated batch"
+
+
+def test_sweeping_the_residual_does_not_reshuffle_the_rest_of_the_batch(monkeypatch):
+    """Common random numbers: one parameter moves, nothing else does.
+
+    The residual roll is drawn unconditionally, so changing the parameter cannot
+    change how many numbers each scenario consumes. A conditional draw would
+    shift every later draw, and the sweep would then be measuring the parameter
+    plus a different Monte Carlo realisation.
+    """
+    base = generate_scenarios(n=2000, seed=37)
+    monkeypatch.setattr(gen_mod, "RESIDUAL_HARD_FRACTION", 0.30)
+    swept = generate_scenarios(n=2000, seed=37)
+
+    assert [s.reason_code for s in base] == [s.reason_code for s in swept]
+    assert [s.amount_paise for s in base] == [s.amount_paise for s in swept]
+    pairs = zip(base, swept, strict=True)
+    changed = [i for i, (a, b) in enumerate(pairs) if a.is_hard_decline != b.is_hard_decline]
+    assert changed, "the parameter must do something"
+    assert all(base[i].reason_code == "other" for i in changed), (
+        "only residual-bucket scenarios may change"
+    )
 
 
 # --- scenario fields ----------------------------------------------------------
@@ -155,6 +196,24 @@ def test_every_numeric_constant_in_the_module_is_registered():
     # module and never registered. SELF_RECOVERY_RATE_SOFT was exactly this in
     # the draft -- an ASSUMPTION driving the ground-truth label, unmarked.
     assert unregistered_constants(gen_mod, PARAMS, UNREGISTERED_OK) == []
+
+
+def test_no_magic_numbers_inside_the_generator_functions():
+    assert unregistered_literals(gen_mod) == []
+
+
+def test_every_swept_assumption_is_actually_read_by_the_module():
+    assert unread_assumptions(gen_mod, PARAMS) == []
+
+
+def test_amount_weights_sum_to_one_and_align_with_the_choices():
+    # Untested in the plan. random.choices normalises silently, so a weight set
+    # that does not sum to 1 distorts the distribution without failing -- exactly
+    # how the reason mix reached 1.1000 undetected.
+    weights = PARAMS["amount_weights"]["value"]
+    choices = PARAMS["amount_distribution"]["value"]
+    assert abs(sum(weights) - 1.0) < 1e-9
+    assert len(weights) == len(choices)
 
 
 def test_the_self_recovery_rates_are_assumptions_with_sweeps():

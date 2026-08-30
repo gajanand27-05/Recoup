@@ -51,6 +51,25 @@ CHANNEL_MULTIPLIER: dict[str, float] = {
 # --- ASSUMPTION: swept 0.30-1.00 ---------------------------------------------
 HARD_DECLINE_MULTIPLIER = 0.60
 
+# --- ASSUMPTION: swept 0.00-1.00 ---------------------------------------------
+# How much of ATTEMPT_DECAY is applied ON TOP of DAY_OFFSET_CURVE.
+#
+# The two sources may measure overlapping effects. Baremetrics reports recovery
+# by day offset within a dunning SEQUENCE, so its later days are also its later
+# attempts; Churnkey reports incremental recovery by email index. Both encode
+# "a later contact recovers less". Multiplying them may discount that decline
+# twice.
+#
+# We cannot resolve it from the published figures -- neither source states how
+# its two dimensions relate. So it becomes an explicit, swept parameter rather
+# than an unexamined multiplication.
+#
+# 1.0 = full compounding, the default, because it produces LOWER modelled
+# recovery in both arms and therefore a smaller lift. Where the modelling is
+# ambiguous the default should be the one that claims less.
+# 0.0 = timing only; attempt number adds no further penalty.
+ATTEMPT_DECAY_COMPOUNDING = 1.0
+
 # --- ASSUMPTION: swept 0.90-1.00 ---------------------------------------------
 # The Baremetrics table stops at day 30 and something has to happen past it.
 # Every option is an invention; this one is a slow decay matching the source's
@@ -73,21 +92,17 @@ PARAMS: dict[str, dict] = {
         "population": "6M failed payments, CY2024",
         "derivation": "[2.8, 1.9, 1.7, 1.5, 1.5] incremental recovery per email, each / 2.8",
     },
-    "channel_multipliers": {
-        "constant": "CHANNEL_MULTIPLIER",
-        "value": CHANNEL_MULTIPLIER,
-        "class": "ASSUMPTION",
-        "source": "see per-channel entries below",
-        "sweep": [0.07, 1.50],
-        "note": "container entry; the individual channels carry their own classes",
-    },
     "channel_multiplier_email": {
+        "constant": "CHANNEL_MULTIPLIER",
+        "constant_key": "email",
         "value": 1.00,
         "class": "DEFINITIONAL",
         "source": "normalisation anchor -- every other channel is relative to email",
         "note": "a choice of units, not a finding, and not evidence for anything",
     },
     "channel_multiplier_sms": {
+        "constant": "CHANNEL_MULTIPLIER",
+        "constant_key": "sms",
         "value": 0.60,
         "class": "ASSUMPTION",
         "source": "ASSUMPTION -- no sourced per-message SMS effectiveness figure exists",
@@ -101,6 +116,8 @@ PARAMS: dict[str, dict] = {
         ),
     },
     "channel_multiplier_whatsapp": {
+        "constant": "CHANNEL_MULTIPLIER",
+        "constant_key": "whatsapp",
         "value": 1.00,
         "class": "ASSUMPTION",
         "source": "ASSUMPTION -- WhatsApp absent from Churnkey's US-centric data",
@@ -122,6 +139,21 @@ PARAMS: dict[str, dict] = {
             "Hard declines need a new payment method, a larger customer action than "
             "topping up a balance. Upper endpoint 1.00 is 'no penalty at all', which "
             "the sweep must be able to reach for it to be a real test."
+        ),
+    },
+    "attempt_decay_compounding": {
+        "constant": "ATTEMPT_DECAY_COMPOUNDING",
+        "value": ATTEMPT_DECAY_COMPOUNDING,
+        "class": "ASSUMPTION",
+        "source": "ASSUMPTION -- the two sources may measure overlapping effects",
+        "sweep": [0.00, 1.00],
+        "note": (
+            "Baremetrics reports recovery by day offset within a dunning sequence, "
+            "so its later days are also its later attempts; Churnkey reports "
+            "incremental recovery by email index. Multiplying them may discount "
+            "the same decline twice, and neither source states how its dimensions "
+            "relate. Default 1.0 (full compounding) because it lowers modelled "
+            "recovery in both arms and so claims less."
         ),
     },
     "decay_beyond_curve": {
@@ -196,7 +228,11 @@ def recovery_probability(
 
     p = _base_rate(day_offset)
     p *= CHANNEL_MULTIPLIER[channel]
-    p *= ATTEMPT_DECAY[min(attempt_no - 1, len(ATTEMPT_DECAY) - 1)]
+    raw_decay = ATTEMPT_DECAY[min(attempt_no - 1, len(ATTEMPT_DECAY) - 1)]
+    # Interpolate between "no extra attempt penalty" (1.0) and the full measured
+    # decay, per ATTEMPT_DECAY_COMPOUNDING. See its definition for why this is a
+    # parameter and not a plain multiplication.
+    p *= 1.0 + ATTEMPT_DECAY_COMPOUNDING * (raw_decay - 1.0)
     if is_hard_decline:
         p *= HARD_DECLINE_MULTIPLIER
     return max(0.0, min(1.0, p))

@@ -148,3 +148,99 @@ outright with `taskkill /F`. Restarted against the same database:
 The tests proved the mechanism worked when triggered. Nobody had tested whether the trigger
 would ever fire. A mechanism verified only from the inside is an assumption about the outside
 world, and this one was wrong.
+
+---
+
+## INC-003 — Pre-freeze audit of the simulator: four findings
+
+**2026-08-30 20:53 IST** · severity: high (freezing would have made all four permanent) · status: fixed
+
+**Why this audit happened**
+
+Two arithmetic/provenance errors had already been found in `curve.py` and `generator.py` —
+a 100× unit error on the SMS channel multiplier, and a reason mix summing to 1.1000. Task 10
+freezes `simulator/` and tags it, after which corrections stop being cheap and start being a
+claim that the file has not moved. So the files were re-read against `PARAMS.md` on the
+assumption that a third error existed.
+
+Four did.
+
+### F-1 · A swept parameter that nothing read — **the serious one**
+
+`residual_bucket_is_soft` was registered as an `ASSUMPTION` with a sweep range of 0–30% and
+**implemented nowhere**. No code read it.
+
+Task 23b sweeps every parameter marked `ASSUMPTION`. It would have varied this one across its
+declared range, observed an identical result at every point, and recorded it as **insensitive**
+— manufacturing evidence of robustness for a parameter that had never been wired up. In the
+one analysis whose entire job is to find where the result is fragile, that is a false negative
+produced by the analysis itself.
+
+Fixed: it is now `residual_hard_fraction`, read by `generate_scenarios`. `unread_assumptions()`
+fails any swept `ASSUMPTION` that no constant implements.
+
+Two related registry gaps surfaced from the same check: `channel_multiplier_sms` and
+`channel_multiplier_whatsapp` were swept assumptions naming **no constant at all** — they are
+entries inside `CHANNEL_MULTIPLIER`, and the registry had no way to say so. The sweep would
+have had nothing to move. The registry now supports `constant_key`.
+
+### F-2 · The provenance scanner was blind to whole types
+
+`unregistered_constants()` checked `int | float | dict | list | tuple`. It did not check
+`set` or `frozenset` — and `HARD_DECLINE_CODES` is a frozenset. The scan was blind to exactly
+the shape one of the real parameters has. It happened to be registered anyway, which is luck
+rather than coverage.
+
+A scan that reports clean while unable to see a category is worse than no scan: it
+manufactures confidence. Fixed, with a parametrised test over every parameter-shaped type.
+
+The scan was also structurally unable to see numbers written *inside* function bodies —
+`p *= 0.9` would have been invisible. `unregistered_literals()` now walks the AST for those.
+None exist today; the check exists so none appear.
+
+### F-3 · `PARAMS.md` had drifted from the registry
+
+`PARAMS.md` is the artifact a judge reads. The registry is what the code runs. Nothing kept
+them in step, and Task 9 registered **six** generator parameters that `PARAMS.md` described
+nowhere — including `self_recovery_rate_soft` and `_hard`, the numbers that define the
+counterfactual the entire lift claim is measured against.
+
+Every test passed throughout, because they only ever checked the registry against itself.
+
+Fixed: `PARAMS.md` now documents all seventeen, and a test matches every registry key against
+the document by exact key.
+
+### F-4 · Two sources may be measuring the same decline twice
+
+`recovery_probability` multiplies `DAY_OFFSET_CURVE` by `ATTEMPT_DECAY`. Baremetrics reports
+recovery by day offset *within a dunning sequence*, so its later days are also its later
+attempts; Churnkey reports incremental recovery by email index. Both encode "a later contact
+recovers less", and multiplying them may discount that decline twice.
+
+Neither source states how its dimensions relate, so this cannot be settled from the published
+figures. Recorded as **A-016** in `DECISION.md`: it becomes an explicit swept parameter,
+`attempt_decay_compounding`, defaulting to **1.0 — full compounding** — because that lowers
+modelled recovery in both arms and therefore claims less.
+
+### Also corrected
+
+`PARAMS.md` said recovery falls "~3x" between day 7 and day 15. The measured ratio is
+**2.727**. Rounding a load-bearing structural fact up to the next whole number is a small
+overstatement of exactly the kind that gets checked.
+
+**How these were found**
+
+By a line-by-line audit against `PARAMS.md`, prompted by two prior errors in the same files
+and by the freeze making them permanent. F-1 and F-2 were found by writing checks for the
+checkers rather than by re-reading the parameters. The parameters themselves were, on this
+pass, correct.
+
+**Lesson kept**
+
+Every finding here is the same shape as the five before it: **the guard sat fractionally
+outside the path the failure takes.** The provenance scan could not see frozensets. The sweep
+registry could not see dict members. The registry tests never looked at the document. Two of
+these were in machinery written *specifically* to catch this class of error.
+
+The audit that works is not "re-read the numbers" — the numbers were fine. It is "ask what
+each check cannot see."

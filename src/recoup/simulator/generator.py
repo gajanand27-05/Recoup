@@ -68,6 +68,16 @@ HARD_DECLINE_CODES: frozenset[str] = frozenset({
 SELF_RECOVERY_RATE_SOFT = 0.18
 SELF_RECOVERY_RATE_HARD = 0.03
 
+# --- ASSUMPTION: how much of the residual bucket is actually hard --------------
+# Six hard-decline codes never appear in Churnkey's table, so they sit inside
+# `other` (5.44%) and default to soft. 0.0 keeps the model as measured; the sweep
+# asks what happens if some of that residual is really hard.
+#
+# This is READ by generate_scenarios. It was previously declared in PARAMS with a
+# sweep and implemented nowhere -- the sensitivity analysis would have varied it,
+# seen no change, and reported robustness that had never been tested.
+RESIDUAL_HARD_FRACTION = 0.0
+
 # --- ASSUMPTION: Indian SaaS subscription price points, in paise ---------------
 _AMOUNT_CHOICES = [29900, 49900, 79900, 99900, 149900, 249900, 499900]
 _AMOUNT_WEIGHTS = [0.22, 0.26, 0.18, 0.14, 0.10, 0.06, 0.04]
@@ -97,17 +107,18 @@ PARAMS: dict[str, dict] = {
         "source": "https://docs.stripe.com/declines/codes",
         "population": "Stripe's published non-retryable decline codes",
     },
-    "residual_bucket_is_soft": {
-        "value": 0.0,
+    "residual_hard_fraction": {
+        "constant": "RESIDUAL_HARD_FRACTION",
+        "value": RESIDUAL_HARD_FRACTION,
         "class": "ASSUMPTION",
         "source": "ASSUMPTION -- six hard codes are absent from Churnkey's table",
         "sweep": [0.0, 0.30],
         "note": (
             "lost_card, stolen_card, pickup_card, authentication_required and the "
             "two revocation codes never appear in the sourced mix, so they sit "
-            "inside `other` (5.44%) and are modelled as soft. The sweep asks what "
+            "inside `other` (5.44%) and default to soft. The sweep asks what "
             "happens if up to 30% of the residual is actually hard. Hard-decline "
-            "share is 21.51% as modelled, against the ~21% PARAMS.md claims."
+            "share is 21.51% at 0.0, against the ~21% PARAMS.md claims."
         ),
     },
     "self_recovery_rate_soft": {
@@ -186,7 +197,15 @@ def generate_scenarios(n: int, seed: int) -> list[Scenario]:
     out: list[Scenario] = []
     for i in range(n):
         code = rng.choices(codes, weights=weights, k=1)[0]
+        # Drawn UNCONDITIONALLY, even when the value makes it irrelevant. A
+        # conditional draw would change how many numbers are consumed per
+        # scenario, so sweeping RESIDUAL_HARD_FRACTION would also reshuffle every
+        # later draw -- mixing the parameter's effect with a different Monte Carlo
+        # realisation. Common random numbers across the sweep, deliberately.
+        residual_roll = rng.random()
         hard = code in HARD_DECLINE_CODES
+        if code == "other":
+            hard = residual_roll < RESIDUAL_HARD_FRACTION
         rate = SELF_RECOVERY_RATE_HARD if hard else SELF_RECOVERY_RATE_SOFT
         out.append(
             Scenario(
