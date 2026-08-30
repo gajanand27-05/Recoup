@@ -10,6 +10,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history. The ordering check below reads `git log`, and the
+          # default depth of 1 would find no commits and pass vacuously -- a
+          # green check proving nothing.
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -21,15 +26,26 @@ jobs:
       - name: Lint
         run: ruff check src tests
 
-      # Fails the build if simulator/ has drifted from the freeze.
-      # Skipped until the freeze exists (Task 10, Day 2).
+      # The freeze exists as of Task 10. This is no longer conditional: without a
+      # gate that fails the build, the freeze is a claim rather than a fact.
       - name: Verify simulator freeze
+        run: make verify-sim
+
+      # The ordering claim made on camera at Task 26: the measuring instrument
+      # existed before the thing it measures. `--diff-filter=A` records the add,
+      # so a stub that was later deleted still counts.
+      - name: Verify the simulator predates the agent
         run: |
-          if [ -f PARAMS.lock.json ]; then
-            make verify-sim
-          else
-            echo "no freeze yet (pre-Task-10) — skipping"
+          agent_add=$(git log --all --diff-filter=A --format=%H -- src/recoup/agent/ | tail -1)
+          freeze_add=$(git log --all --diff-filter=A --format=%H -- PARAMS.lock.json | tail -1)
+          if [ -n "$agent_add" ]; then
+            if [ -z "$freeze_add" ]; then
+              echo "agent/ exists but the simulator was never frozen"; exit 1
+            fi
+            git merge-base --is-ancestor "$freeze_add" "$agent_add" \
+              || { echo "agent/ predates the freeze - the ordering claim is false"; exit 1; }
           fi
+          echo "ordering ok (agent add: ${agent_add:-none}, freeze add: ${freeze_add:-none})"
 
       - name: Test
         run: pytest -v -m "not llm"

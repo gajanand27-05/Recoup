@@ -107,8 +107,13 @@ def write_lock(lock_path: str | Path = DEFAULT_LOCK) -> dict:
         "params": _jsonable(locked_params()),
     }
     path = Path(lock_path)
+    # newline="" suppresses translation of \n to os.linesep. Without it these
+    # land CRLF on Windows and LF on Linux, so the working tree and the index
+    # disagree about a file whose whole purpose is being byte-checkable.
     path.write_text(
-        json.dumps(lock, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8"
+        json.dumps(lock, indent=2, sort_keys=True, default=str) + "\n",
+        encoding="utf-8",
+        newline="",
     )
     _write_freeze_doc(lock, path.parent)
     return lock
@@ -164,6 +169,7 @@ Full provenance, including the figures that were located and deliberately reject
 is in `src/recoup/simulator/PARAMS.md`.
 """,
         encoding="utf-8",
+        newline="",
     )
 
 

@@ -1,6 +1,6 @@
 {
-  "frozen_at": "2026-08-30T15:32:53.823722Z",
-  "git_commit": "3d5ee5529ed54182a1a2a289e55940a720866ef7",
+  "frozen_at": "2026-08-30T15:34:46.408290Z",
+  "git_commit": "e0a38e209ed4d7d4b4934ea6a809785958a21379",
   "params": {
     "amount_distribution": {
       "class": "ASSUMPTION",
