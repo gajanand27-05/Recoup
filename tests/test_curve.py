@@ -1,5 +1,3 @@
-import inspect
-
 import pytest
 
 from recoup.simulator import curve as curve_mod
@@ -12,6 +10,7 @@ from recoup.simulator.curve import (
     UNREGISTERED_OK,
     recovery_probability,
 )
+from recoup.simulator.provenance import params_problems, unregistered_constants
 
 # --- the sourced curve, verbatim ----------------------------------------------
 
@@ -225,22 +224,15 @@ def test_every_numeric_constant_in_the_module_is_registered_in_params():
     Same failure shape as MAX_ATTEMPTS, and as the three guards before it: the
     check sat fractionally outside the path the failure takes.
     """
-    registered = {
-        meta.get("constant") for meta in PARAMS.values() if meta.get("constant")
-    }
-    offenders = []
-    for name, value in vars(curve_mod).items():
-        if name.startswith("__") or name in UNREGISTERED_OK:
-            continue
-        if inspect.isfunction(value) or inspect.ismodule(value) or inspect.isclass(value):
-            continue
-        if isinstance(value, bool) or not isinstance(value, int | float | dict | list):
-            continue
-        if name not in registered:
-            offenders.append(name)
-
+    offenders = unregistered_constants(curve_mod, PARAMS, UNREGISTERED_OK)
     assert not offenders, (
-        f"numeric constants not registered in PARAMS: {sorted(offenders)}. Every "
-        "number the curve reads needs a class and a source, or an ASSUMPTION mark "
-        "and a sweep range -- in the same commit that introduces it."
+        f"numeric constants not registered in PARAMS: {offenders}. Every number "
+        "the curve reads needs a class and a source, or an ASSUMPTION mark and a "
+        "sweep range -- in the same commit that introduces it."
     )
+
+
+def test_every_curve_parameter_is_well_formed():
+    # Same checker the generator uses. One implementation, so the two registries
+    # cannot drift into disagreeing about what a valid entry looks like.
+    assert params_problems(PARAMS) == []

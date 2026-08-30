@@ -18,7 +18,7 @@ the module, which is precisely how an unsourced beyond-curve decay survived the 
 
 import bisect
 
-CLASSES = ("MEASURED", "DERIVED", "DEFINITIONAL", "ASSUMPTION")
+from recoup.simulator.provenance import CLASSES  # noqa: F401  (re-exported for callers)
 
 # --- MEASURED: Baremetrics, 1M+ dunning emails, US B2B SaaS, Dec 2024 --------
 # Not monotonic -- day 30 exceeds day 20. That is in the source. Do not smooth it.
