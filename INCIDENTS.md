@@ -244,3 +244,49 @@ these were in machinery written *specifically* to catch this class of error.
 
 The audit that works is not "re-read the numbers" — the numbers were fine. It is "ask what
 each check cannot see."
+
+---
+
+## 🔒 FREEZE RECORD — the simulator, 2026-08-30 21:05 IST
+
+Not an incident. Recorded here because `INCIDENTS.md` is the live build log, and this is the
+moment the ordering claim became checkable rather than asserted.
+
+| | |
+|---|---|
+| `sha256(simulator/)` | `4cb02cb7ea9ad140e051c2de0ae6683d0c0bb80d4b55c0386f8f6cb0028a4e14` |
+| Tag | `sim-freeze-v1` → `c25471a` |
+| Tagged | 2026-08-30 21:05:22 +0530 |
+| Parameters locked | 17 — **4 MEASURED, 10 ASSUMPTION, 3 DERIVED/DEFINITIONAL** |
+
+**`src/recoup/agent/` did not exist at the moment of the freeze**, in the working tree or
+anywhere in history:
+
+```
+$ git log --all --diff-filter=A -- src/recoup/agent/   →   0 commits
+```
+
+That is the claim, and it is now enforced three ways rather than remembered: a filesystem
+check and a git-history check in `tests/test_build_order.py`, and an ordering job in CI that
+fails the build if any commit adds a file under `agent/` before the commit that added
+`PARAMS.lock.json`.
+
+**The drift gate was verified to bite** before being trusted. One comment line appended to
+`curve.py`:
+
+```
+SIMULATOR DRIFT: simulator/ has changed since the freeze.
+  locked:  4cb02cb7ea9ad140e051c2de0ae6683d0c0bb80d4b55c0386f8f6cb0028a4e14
+  current: e56cb61a694460eeff85ef6e51dfb4a9d94460e7f6c08973aedc3dc304c74900
+exit=1
+```
+
+and exit 0 after reverting.
+
+**The tag is deliberately not pushed.** It stays local until the build is further along, so
+it can still be moved if a genuine correction is needed. A pushed tag that later has to move
+is worse than an unpushed one — the point of the tag is that it did not move.
+
+**Worth saying plainly:** 10 of 17 parameters are `ASSUMPTION`. That is the honest
+description of this simulator, it is on the face of `SIMULATOR_FREEZE.md`, and it is why the
+sensitivity sweep in Task 23b is not optional.
