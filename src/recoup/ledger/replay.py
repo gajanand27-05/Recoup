@@ -14,9 +14,9 @@ reality rather than by taste:
 Why conflicts raise instead of resolving
 ----------------------------------------
 Commutative accumulation covers the fields that accumulate. It says nothing about
-the fields that are simply ASSIGNED -- `arm`, `customer_id`, `amount_paise`, and
-the cost of a given attempt. Those are last-write-wins, and last-write-wins over
-an unordered stream means "whichever happened to arrive last".
+the fields that are simply ASSIGNED -- `arm`, `customer_id`, and the cost of a
+given attempt. Those are last-write-wins, and last-write-wins over an unordered
+stream means "whichever happened to arrive last".
 
 Shuffling a fixture whose rows all agree will never reveal this: with no
 conflicting values there is no last write to observe. So the assignment path
@@ -26,11 +26,27 @@ a number rather than raising it as a fault.
 
 Identical repeats are not conflicts. At-least-once delivery makes the same row
 arriving five times entirely ordinary.
+
+What is NOT conflictable, and why
+---------------------------------
+There is no subscription-level amount here, deliberately. Two different amounts
+for one subscription is a perfectly ordinary history -- a plan change, a
+proration, a different invoice -- and a Razorpay subscription entity does not
+carry an amount at all: it carries `plan_id`, while the money lives on the plan's
+`item.amount` and on invoice and payment entities. Amount is per-INVOICE.
+
+Treating it as a conflictable subscription scalar would have halted a whole batch
+run on the first legitimate upgrade, and the pressure then would be to weaken the
+conflict check itself -- taking the `arm` protection down with it. The conflict
+disappears by construction rather than by loosening a predicate.
+
+Money that matters to the measurement arrives as `outcome.recovered`, which is
+accumulated with `max` so a redelivery cannot invent payment. An at-risk
+denominator, when Task 22 needs one, must be built per invoice and not as a
+scalar on this state.
 """
 
 from dataclasses import dataclass, field
-
-_CONFLICTABLE = ("arm", "customer_id", "amount_paise")
 
 
 class ReplayConflict(Exception):
@@ -51,7 +67,6 @@ class SubscriptionState:
     recovered_paise: int = 0
     opted_out: bool = False
     ptp_date: str | None = None
-    amount_paise: int = 0
 
     @property
     def attempts(self) -> int:
@@ -64,6 +79,11 @@ class SubscriptionState:
     @property
     def status(self) -> str:
         """The OUTCOME, which is not the same question as `opted_out`.
+
+        NOTE: `PLAN.md` Task 7 says opt-out is terminal. This deliberately does
+        the opposite, and the plan is not the authority here. Its own test only
+        covers the case where nothing was recovered, so both readings pass it.
+        Do not "restore" the plan's behaviour without reading the next paragraph.
 
         Recovery outranks opt-out deliberately. Opting out of further messaging
         does not un-pay an invoice, and treating it as terminal would drop a real
@@ -78,6 +98,35 @@ class SubscriptionState:
         if self.attempts:
             return "in_progress"
         return "new"
+
+    def to_canonical(self) -> dict:
+        """The ONLY way this state gets serialised. One projection, all callers.
+
+        `attempts_seen` is a set and `spend_by_attempt` is a dict whose insertion
+        order follows webhook ARRIVAL order. Two identical runs therefore hold
+        equal states -- set and dict equality do not care about order -- while
+        producing different bytes through any serialiser that walks them as they
+        sit. A `.head`-style artifact, a report digest, or anything hashed would
+        then mismatch with no attacker and no bug.
+
+        That is the same failure as the append/verify payload divergence in Task
+        3 (INC-001), and it gets the same fix: not "remember to sort", but a
+        single projection that every caller goes through. Sets become sorted
+        lists; integer keys become strings, because JSON has no others.
+        """
+        return {
+            "subscription_id": self.subscription_id,
+            "customer_id": self.customer_id,
+            "arm": self.arm,
+            "attempts_seen": sorted(self.attempts_seen),
+            "spend_by_attempt": {
+                str(k): self.spend_by_attempt[k] for k in sorted(self.spend_by_attempt)
+            },
+            "recovered_paise": self.recovered_paise,
+            "opted_out": self.opted_out,
+            "ptp_date": self.ptp_date,
+            "status": self.status,
+        }
 
 
 def _assign(state: SubscriptionState, field_name: str, value: object) -> None:
@@ -116,10 +165,7 @@ def replay(rows: list[dict]) -> dict[str, SubscriptionState]:
 
         event = row["event_type"]
 
-        if event == "webhook.received":
-            _assign(st, "amount_paise", payload.get("amount_paise"))
-
-        elif event == "action.executed":
+        if event == "action.executed":
             attempt = payload.get("attempt_no")
             if attempt is not None:
                 cost = payload.get("cost_paise", 0)
@@ -156,3 +202,12 @@ def count_unattributable(rows: list[dict]) -> int:
     shortens the denominator exactly the way a given-up event does.
     """
     return sum(1 for row in rows if not row.get("subscription_id"))
+
+
+def canonical_states(states: dict[str, SubscriptionState]) -> dict:
+    """Serialise a whole replay result deterministically.
+
+    Use this rather than walking `states` directly anywhere the output is hashed,
+    diffed, written to a file, or compared between runs.
+    """
+    return {sub_id: states[sub_id].to_canonical() for sub_id in sorted(states)}

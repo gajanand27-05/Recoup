@@ -1,4 +1,5 @@
 import itertools
+import json
 import random
 
 import pytest
@@ -6,9 +7,11 @@ import pytest
 from recoup.ledger.replay import (
     ReplayConflict,
     SubscriptionState,
+    canonical_states,
     count_unattributable,
     replay,
 )
+from recoup.ledger.store import canonical_json
 
 
 def _rows():
@@ -166,14 +169,34 @@ def test_a_conflicting_customer_id_is_refused():
             replay(shuffled)
 
 
-def test_a_conflicting_amount_is_refused():
+def test_two_different_amounts_are_not_a_conflict():
+    """Amount is per-INVOICE, so there is no subscription-level amount to conflict.
+
+    A plan change, a proration or simply a different invoice produces two
+    different amounts for one subscription, and that is an ordinary history. A
+    Razorpay subscription entity does not even carry an amount -- it carries
+    `plan_id`; the money is on the plan's `item.amount` and on invoice and
+    payment entities.
+
+    Treating it as a conflictable scalar would have halted a 2,000-subscription
+    run on the first legitimate upgrade, and the fix under that pressure would be
+    to weaken the conflict check -- taking the `arm` protection down with it.
+    """
     rows = [
         _row(1, "webhook.received", payload={"amount_paise": 49900}),
         _row(2, "webhook.received", payload={"amount_paise": 99900}),
     ]
     for shuffled in _all_orders(rows, n=5):
-        with pytest.raises(ReplayConflict, match="amount_paise"):
-            replay(shuffled)
+        replay(shuffled)  # must not raise
+
+
+def test_two_recoveries_of_different_size_take_the_larger():
+    rows = [
+        _row(1, "outcome.recovered", payload={"amount_paise": 20000}),
+        _row(2, "outcome.recovered", payload={"amount_paise": 49900}),
+    ]
+    for shuffled in _all_orders(rows, n=5):
+        assert replay(shuffled)["sub_1"].recovered_paise == 49900
 
 
 def test_the_same_attempt_with_two_different_costs_is_refused():
@@ -259,9 +282,63 @@ def test_a_clean_run_has_nothing_unattributable():
 # --- equality is total --------------------------------------------------------
 
 
-def test_states_differing_only_in_amount_are_not_equal():
-    # The order-independence test compares states, so anything excluded from
-    # equality is a field that test cannot see.
-    a = SubscriptionState(subscription_id="s", amount_paise=100)
-    b = SubscriptionState(subscription_id="s", amount_paise=200)
-    assert a != b
+def test_equality_covers_every_field_the_order_test_relies_on():
+    # The order-independence tests compare states, so any field excluded from
+    # equality is a field those tests are blind to.
+    a = SubscriptionState(subscription_id="s")
+    for field_name, value in [
+        ("customer_id", "c"), ("arm", "control"), ("recovered_paise", 1),
+        ("opted_out", True), ("ptp_date", "2026-09-01"),
+        ("attempts_seen", {1}), ("spend_by_attempt", {1: 5}),
+    ]:
+        b = SubscriptionState(subscription_id="s")
+        setattr(b, field_name, value)
+        assert a != b, f"{field_name} is invisible to state equality"
+
+
+# --- serialisation: one projection, all callers -------------------------------
+
+
+def test_two_arrival_orders_serialise_to_identical_bytes():
+    """Equal states must also be equal BYTES.
+
+    `attempts_seen` is a set and `spend_by_attempt` is insertion-ordered, so a
+    serialiser that walks them as they sit produces different output for equal
+    states. Anything hashed, diffed or written to a .head-style artifact would
+    then mismatch with no attacker and no bug -- the same failure as INC-001.
+    """
+    forward = replay(_rows())["sub_1"]
+    backward = replay(list(reversed(_rows())))["sub_1"]
+    assert forward == backward
+    assert canonical_json(forward.to_canonical()) == canonical_json(
+        backward.to_canonical()
+    )
+
+
+def test_the_canonical_projection_is_json_serialisable_at_all():
+    # A raw state is NOT: attempts_seen is a set, which json.dumps refuses.
+    # That is the trap the projection exists to remove.
+    state = replay(_rows())["sub_1"]
+    with pytest.raises(TypeError):
+        json.dumps(state.__dict__)
+    json.dumps(state.to_canonical())
+
+
+def test_canonical_states_is_stable_across_every_permutation():
+    canonical = canonical_json(canonical_states(replay(_rows())))
+    for perm in itertools.permutations(_rows()):
+        assert canonical_json(canonical_states(replay(list(perm)))) == canonical
+
+
+def test_canonical_states_sorts_subscriptions():
+    rows = _rows() + [dict(_rows()[0], subscription_id="sub_0", customer_id="cust_0")]
+    assert list(canonical_states(replay(rows))) == ["sub_0", "sub_1"]
+
+
+def test_integer_attempt_keys_survive_a_json_round_trip():
+    # JSON object keys are strings. Left as ints they would come back as "1" and
+    # silently stop matching anything that looks them up.
+    state = replay(_rows())["sub_1"]
+    round_tripped = json.loads(canonical_json(state.to_canonical()))
+    assert round_tripped["spend_by_attempt"] == {"1": 12, "2": 15}
+    assert round_tripped["attempts_seen"] == [1, 2]
