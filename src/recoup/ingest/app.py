@@ -71,6 +71,20 @@ TRANSPORTS = ("real", "sim")
 # Neither. Attempts are counted, and after MAX_ATTEMPTS the event moves to the
 # terminal `failed` status, which the sweep skips and the report must account
 # for. Giving up is allowed; giving up silently is not.
+#
+# MAX_ATTEMPTS = 3 -- class: SELF_IMPOSED. Not sourced, and not derived from
+# anything; it is a choice, recorded here so the reasoning lives with the number.
+#
+# Why 3 and not 1 or 10: a poison payload is DETERMINISTIC. Re-running it cannot
+# make it parse. So retries do not exist to eventually succeed -- they exist to
+# survive transient conditions that are not about the payload at all: SQLite
+# write contention, a locked database during a concurrent read, a disk blip.
+# Those clear in one or two attempts or they are not transient. Anything past ~3
+# is spent re-failing on the deterministic case, which is the cost this cap
+# exists to bound. 1 would retire an event on a single lock contention.
+#
+# Coincidentally equal to Razorpay's own retry count, which is not the reason and
+# should not be read as one.
 MAX_ATTEMPTS = 3
 
 _SEEN_SCHEMA = """

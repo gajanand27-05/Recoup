@@ -72,6 +72,12 @@ class TransportSplit:
 
 
 def summarise(rows: list[dict]) -> TransportSplit:
+    """Count the split. Never raises on an empty input.
+
+    Safe for progress views, mid-run output and fixtures -- anything whose honest
+    answer may be "nothing yet". An unknown or missing transport still raises,
+    because that is a data-integrity failure rather than an incomplete run.
+    """
     counts = Counter(r.get("transport") for r in rows)
     unknown = set(counts) - set(TRANSPORTS)
     if unknown:
@@ -82,17 +88,29 @@ def summarise(rows: list[dict]) -> TransportSplit:
     return TransportSplit(real=counts.get("real", 0), sim=counts.get("sim", 0))
 
 
-def require_declared_split(rows: list[dict]) -> TransportSplit:
-    """Gate a pooled figure. Raises unless pooling is actually legitimate.
+def require_declared_split(rows: list[dict], *, run_id: str) -> TransportSplit:
+    """Gate a pooled figure for ONE named run. Raises unless pooling is legitimate.
 
     Call this before rendering any number computed over `rows` as a whole. It is
-    deliberately awkward to bypass: the caller must either satisfy it or handle
-    the exception, and either way the split has been thought about once.
+    deliberately awkward to bypass: the caller must satisfy it or handle the
+    exception, and either way the split has been considered once.
+
+    `run_id` is required, and not decoration. Without it, an empty `rows` raises
+    a generic "nothing was measured", which is also what a mid-run report or a
+    fixture with no rows looks like -- and the pressure then falls on softening
+    *this predicate*, which would take the real check down with it.
+
+    With the run named, an empty result is a statement about that run ("run X
+    produced no rows"), which is a real problem worth failing on. Anything that
+    legitimately has nothing to say yet is not reporting on a finished run and
+    should call `summarise()` instead: it never raises on an empty input, and
+    `caveat()` still returns a printable sentence.
     """
     split = summarise(rows)
     if not split.is_pooled_reporting_safe:
         raise ValueError(
-            "refusing to pool: " + split.caveat() + " Report per transport, or "
-            "state the split explicitly."
+            f"refusing to pool run {run_id!r}: {split.caveat()} Report per "
+            "transport, or state the split explicitly. If this run is not "
+            "finished, use summarise() rather than relaxing this check."
         )
     return split

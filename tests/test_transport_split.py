@@ -32,8 +32,8 @@ def test_an_all_real_run_says_the_simulator_was_not_used():
 
 def test_a_mixed_run_refuses_to_pool():
     # The case D-009 forbids: one figure mixing a real outcome with a modelled one.
-    with pytest.raises(ValueError, match="refusing to pool"):
-        require_declared_split(_rows(real=4, sim=1996))
+    with pytest.raises(ValueError, match="refusing to pool run 'run-1'"):
+        require_declared_split(_rows(real=4, sim=1996), run_id="run-1")
 
 
 def test_a_mixed_run_names_both_counts_so_the_split_can_be_reported():
@@ -43,9 +43,27 @@ def test_a_mixed_run_names_both_counts_so_the_split_can_be_reported():
     assert "4 real and 1996 simulated" in split.caveat()
 
 
-def test_an_empty_run_is_not_quietly_reportable():
-    with pytest.raises(ValueError, match="Nothing was measured"):
-        require_declared_split([])
+def test_an_empty_finished_run_is_an_error_naming_that_run():
+    # Not a generic "nothing was measured" -- that is indistinguishable from a
+    # mid-run view, and the fix under pressure would be to soften the predicate.
+    with pytest.raises(ValueError, match="run 'run-2026-08-30'"):
+        require_declared_split([], run_id="run-2026-08-30")
+
+
+def test_a_partial_state_has_a_path_that_does_not_raise():
+    # A mid-run view, or a fixture with no rows yet, must have somewhere to go
+    # other than through the gate. Otherwise the gate is what gets loosened.
+    split = summarise([])
+    assert split.total == 0
+    assert split.is_pooled_reporting_safe is False
+    assert "Nothing was measured" in split.caveat()
+
+
+def test_the_escape_hatch_still_refuses_bad_data():
+    # summarise() tolerates an incomplete run. It does not tolerate a row that
+    # never declared its transport -- that is corruption, not incompleteness.
+    with pytest.raises(ValueError, match="unknown transport"):
+        summarise([{"transport": None}])
 
 
 def test_an_unknown_transport_value_stops_everything():
@@ -61,7 +79,7 @@ def test_a_missing_transport_is_treated_as_unknown_not_as_sim():
 
 
 def test_a_legitimate_pooled_run_returns_the_split_for_the_caveat():
-    split = require_declared_split(_rows(sim=5))
+    split = require_declared_split(_rows(sim=5), run_id="run-ok")
     assert split == TransportSplit(real=0, sim=5)
     assert split.total == 5
 
