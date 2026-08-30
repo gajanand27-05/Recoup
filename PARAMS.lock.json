@@ -1,0 +1,237 @@
+{
+  "frozen_at": "2026-08-30T15:32:53.823722Z",
+  "git_commit": "3d5ee5529ed54182a1a2a289e55940a720866ef7",
+  "params": {
+    "amount_distribution": {
+      "class": "ASSUMPTION",
+      "constant": "_AMOUNT_CHOICES",
+      "note": "Plausible Indian SaaS price points. Affects money-weighted figures only, not recovery rates. Reported in rupees alongside rate figures precisely so a reader can see which claims depend on it.",
+      "source": "ASSUMPTION -- no sourced Indian SaaS subscription price distribution",
+      "sweep": [
+        29900,
+        499900
+      ],
+      "value": [
+        29900,
+        49900,
+        79900,
+        99900,
+        149900,
+        249900,
+        499900
+      ]
+    },
+    "amount_weights": {
+      "class": "ASSUMPTION",
+      "constant": "_AMOUNT_WEIGHTS",
+      "note": "Skewed toward lower price points; sums to 1.0.",
+      "source": "ASSUMPTION -- weights over the price points above",
+      "sweep": [
+        0.0,
+        1.0
+      ],
+      "value": [
+        0.22,
+        0.26,
+        0.18,
+        0.14,
+        0.1,
+        0.06,
+        0.04
+      ]
+    },
+    "attempt_decay": {
+      "class": "DERIVED",
+      "constant": "ATTEMPT_DECAY",
+      "derivation": "[2.8, 1.9, 1.7, 1.5, 1.5] incremental recovery per email, each / 2.8",
+      "population": "6M failed payments, CY2024",
+      "source": "https://churnkey.co/blog/involuntary-churn-benchmarks/",
+      "value": [
+        1.0,
+        0.68,
+        0.61,
+        0.54,
+        0.54
+      ]
+    },
+    "attempt_decay_compounding": {
+      "class": "ASSUMPTION",
+      "constant": "ATTEMPT_DECAY_COMPOUNDING",
+      "note": "Baremetrics reports recovery by day offset within a dunning sequence, so its later days are also its later attempts; Churnkey reports incremental recovery by email index. Multiplying them may discount the same decline twice, and neither source states how its dimensions relate. Default 1.0 (full compounding) because it lowers modelled recovery in both arms and so claims less.",
+      "source": "ASSUMPTION -- the two sources may measure overlapping effects",
+      "sweep": [
+        0.0,
+        1.0
+      ],
+      "value": 1.0
+    },
+    "baseline_recovery_rate": {
+      "class": "MEASURED",
+      "note": "p1 in the power calculation (A-001). Not read by this module.",
+      "population": "Stripe Smart Retries alone, 5.4M failures",
+      "source": "https://churnkey.co/blog/involuntary-churn-benchmarks/",
+      "value": 0.51
+    },
+    "channel_multiplier_email": {
+      "class": "DEFINITIONAL",
+      "constant": "CHANNEL_MULTIPLIER",
+      "constant_key": "email",
+      "note": "a choice of units, not a finding, and not evidence for anything",
+      "source": "normalisation anchor -- every other channel is relative to email",
+      "value": 1.0
+    },
+    "channel_multiplier_sms": {
+      "class": "ASSUMPTION",
+      "constant": "CHANNEL_MULTIPLIER",
+      "constant_key": "sms",
+      "note": "Low endpoint is Churnkey's share ratio 0.6/8.4 read literally as effectiveness -- a reading we hold invalid, used only as a pessimistic bound. High endpoint is SMS outperforming email, directionally supported by Cadena & Schoar, NBER WP 17020 (2011), an RCT finding +7-9pp on on-time payment from monthly SMS reminders.",
+      "source": "ASSUMPTION -- no sourced per-message SMS effectiveness figure exists",
+      "sweep": [
+        0.07,
+        1.5
+      ],
+      "value": 0.6
+    },
+    "channel_multiplier_whatsapp": {
+      "class": "ASSUMPTION",
+      "constant": "CHANNEL_MULTIPLIER",
+      "constant_key": "whatsapp",
+      "note": "Modelled at email parity. Deliberately NOT modelled higher: the quoted 'WhatsApp 98% open rate' traces to vendor copy with no published methodology and no Meta-published equivalent. What is sourced about WhatsApp is cost, not effectiveness.",
+      "source": "ASSUMPTION -- WhatsApp absent from Churnkey's US-centric data",
+      "sweep": [
+        0.5,
+        1.5
+      ],
+      "value": 1.0
+    },
+    "day_offset_curve": {
+      "class": "MEASURED",
+      "constant": "DAY_OFFSET_CURVE",
+      "population": "1M+ dunning emails, Baremetrics Recover customers (US B2B SaaS), Dec 2024",
+      "source": "https://baremetrics.com/blog/dunning-email-best-practices",
+      "value": {
+        "0": 0.1325,
+        "15": 0.0422,
+        "20": 0.0383,
+        "3": 0.1146,
+        "30": 0.042,
+        "7": 0.1151
+      }
+    },
+    "decay_beyond_curve": {
+      "class": "ASSUMPTION",
+      "constant": "DECAY_BEYOND_CURVE",
+      "note": "1.00 is flat, no further decay. Not swept below 0.90: a faster decay makes late outreach worthless, which flatters the agent's early-contact policy rather than testing it.",
+      "source": "ASSUMPTION -- the Baremetrics table stops at day 30",
+      "sweep": [
+        0.9,
+        1.0
+      ],
+      "value": 0.97
+    },
+    "hard_decline_codes": {
+      "class": "MEASURED",
+      "constant": "HARD_DECLINE_CODES",
+      "population": "Stripe's published non-retryable decline codes",
+      "source": "https://docs.stripe.com/declines/codes",
+      "value": [
+        "authentication_required",
+        "highest_risk_level",
+        "incorrect_number",
+        "lost_card",
+        "pickup_card",
+        "revocation_of_all_authorizations",
+        "revocation_of_authorization",
+        "stolen_card",
+        "transaction_not_allowed"
+      ]
+    },
+    "hard_decline_multiplier": {
+      "class": "ASSUMPTION",
+      "constant": "HARD_DECLINE_MULTIPLIER",
+      "note": "Hard declines need a new payment method, a larger customer action than topping up a balance. Upper endpoint 1.00 is 'no penalty at all', which the sweep must be able to reach for it to be a real test.",
+      "source": "ASSUMPTION -- direction well founded, magnitude not measured",
+      "sweep": [
+        0.3,
+        1.0
+      ],
+      "value": 0.6
+    },
+    "reason_mix": {
+      "class": "DERIVED",
+      "constant": "REASON_MIX",
+      "derivation": "twelve published code shares verbatim; `other` = 1 - their sum = 0.0544",
+      "population": "5M failed payments, CY2024",
+      "source": "https://churnkey.co/blog/involuntary-churn-benchmarks/",
+      "value": {
+        "card_velocity_exceeded": 0.0105,
+        "do_not_honor": 0.0756,
+        "expired_card": 0.0114,
+        "generic_decline": 0.0578,
+        "highest_risk_level": 0.0799,
+        "incorrect_number": 0.0469,
+        "insufficient_funds": 0.4056,
+        "invalid_account": 0.0271,
+        "other": 0.0544,
+        "partner_insufficient_funds": 0.0368,
+        "previously_declined_do_not_retry": 0.0644,
+        "transaction_not_allowed": 0.0883,
+        "try_again_later": 0.0413
+      }
+    },
+    "residual_hard_fraction": {
+      "class": "ASSUMPTION",
+      "constant": "RESIDUAL_HARD_FRACTION",
+      "note": "lost_card, stolen_card, pickup_card, authentication_required and the two revocation codes never appear in the sourced mix, so they sit inside `other` (5.44%) and default to soft. The sweep asks what happens if up to 30% of the residual is actually hard. Hard-decline share is 21.51% at 0.0, against the ~21% PARAMS.md claims.",
+      "source": "ASSUMPTION -- six hard codes are absent from Churnkey's table",
+      "sweep": [
+        0.0,
+        0.3
+      ],
+      "value": 0.0
+    },
+    "self_recovery_rate_hard": {
+      "class": "ASSUMPTION",
+      "constant": "SELF_RECOVERY_RATE_HARD",
+      "note": "A hard decline needs a new payment method, so unprompted recovery should be rare. 0.00 at the low end is 'never recovers alone'.",
+      "source": "ASSUMPTION -- as above, for the hard-decline segment",
+      "sweep": [
+        0.0,
+        0.1
+      ],
+      "value": 0.03
+    },
+    "self_recovery_rate_soft": {
+      "class": "ASSUMPTION",
+      "constant": "SELF_RECOVERY_RATE_SOFT",
+      "note": "THE most consequential invented number here: it defines the counterfactual the whole lift claim is measured against. Post-halt means Razorpay has stopped retrying, so any recovery is the customer acting unprompted. Swept wide because we have no measurement of it.",
+      "source": "ASSUMPTION -- no published post-halt no-intervention recovery rate",
+      "sweep": [
+        0.05,
+        0.35
+      ],
+      "value": 0.18
+    },
+    "sourced_reason_shares": {
+      "class": "MEASURED",
+      "constant": "_SOURCED_REASON_SHARES",
+      "population": "5M failed payments, CY2024",
+      "source": "https://churnkey.co/blog/involuntary-churn-benchmarks/",
+      "value": {
+        "card_velocity_exceeded": 0.0105,
+        "do_not_honor": 0.0756,
+        "expired_card": 0.0114,
+        "generic_decline": 0.0578,
+        "highest_risk_level": 0.0799,
+        "incorrect_number": 0.0469,
+        "insufficient_funds": 0.4056,
+        "invalid_account": 0.0271,
+        "partner_insufficient_funds": 0.0368,
+        "previously_declined_do_not_retry": 0.0644,
+        "transaction_not_allowed": 0.0883,
+        "try_again_later": 0.0413
+      }
+    }
+  },
+  "simulator_sha256": "4cb02cb7ea9ad140e051c2de0ae6683d0c0bb80d4b55c0386f8f6cb0028a4e14"
+}
