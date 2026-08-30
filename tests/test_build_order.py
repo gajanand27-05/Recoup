@@ -19,6 +19,7 @@ exactly the kind of thing that should fail a test rather than rely on someone
 remembering. If these fail, the fix is never to relax them.
 """
 
+import ast
 import subprocess
 from pathlib import Path
 
@@ -85,15 +86,45 @@ def test_no_commit_has_ever_added_a_file_under_agent_before_the_freeze():
     )
 
 
-def test_the_simulator_is_not_imported_by_anything_it_measures():
-    # Cheap structural echo of the same idea: if `simulator/` ever imports from
-    # `agent/`, the instrument depends on the thing being measured.
+def _imports(path: Path) -> set[str]:
+    """Modules a file actually imports, from the AST.
+
+    Deliberately not a substring search. The first version of this test grepped
+    for "recoup.agent" and failed on `simulator/__init__.py`, whose docstring says
+    the simulator must NEVER import from recoup.agent -- the prose describing the
+    rule tripped the check for the rule. A guard that cannot tell a statement
+    from a sentence about a statement is measuring the wrong thing.
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            found.add(node.module)
+    return found
+
+
+def test_the_simulator_does_not_import_the_thing_it_measures():
+    # An instrument that depends on what it measures is not an instrument.
     sim = REPO / "src" / "recoup" / "simulator"
     if not sim.exists():
         pytest.skip("simulator not built yet")
-    offenders = [
-        p.relative_to(REPO)
+    offenders = {
+        str(p.relative_to(REPO)): sorted(m for m in _imports(p) if m.startswith("recoup.agent"))
         for p in sim.rglob("*.py")
-        if "recoup.agent" in p.read_text(encoding="utf-8")
-    ]
+    }
+    offenders = {k: v for k, v in offenders.items() if v}
     assert not offenders, f"simulator imports from agent: {offenders}"
+
+
+def test_that_import_check_would_actually_catch_an_import(tmp_path):
+    # The guard above is only worth having if it fires on the real thing. Prove
+    # it distinguishes a genuine import from a docstring that merely says the word.
+    real = tmp_path / "real.py"
+    real.write_text("from recoup.agent.jobs import propose\n", encoding="utf-8")
+    assert any(m.startswith("recoup.agent") for m in _imports(real))
+
+    prose = tmp_path / "prose.py"
+    prose.write_text('"""Never import from recoup.agent here."""\n', encoding="utf-8")
+    assert not any(m.startswith("recoup.agent") for m in _imports(prose))
