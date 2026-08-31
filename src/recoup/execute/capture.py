@@ -113,12 +113,34 @@ def pending_captures() -> list[str]:
     )
 
 
+# Identifiers only this repository's own fixtures and generator produce. A payload
+# containing one did not come from Razorpay.
+_FABRICATED_MARKERS: tuple[str, ...] = (
+    "sub_test_", "cust_test_", "sub_sim_", "cust_sim_", "evt_fl_", "evt_smoke",
+    "sub_demo", "TPL_DEMO", "sub_1", "cust_1", "sub_GOLDEN",
+)
+
+
+def looks_fabricated(text: str) -> str | None:
+    """Return the marker that gives a payload away as ours, or None."""
+    for marker in _FABRICATED_MARKERS:
+        if marker in text:
+            return marker
+    return None
+
+
 def promote_capture(event: str) -> Path:
     """Move an observed payload from the inbox into committed evidence.
 
     Deliberately a separate call with no automatic trigger. Promoting a payload
     asserts *this is what Razorpay actually sent*, and that assertion should
     require someone to make it.
+
+    It also refuses payloads carrying our own test identifiers. The inbox is
+    written by any run with `transport="real"`, **including the test suite**, so
+    it legitimately fills up with fabricated payloads — and the CLI that lists
+    them will happily offer one for promotion. Catching that after the fact
+    (INC-006) is worse than refusing it here.
     """
     source = CAPTURE_INBOX / _safe_name(event)
     if not source.exists():
@@ -126,9 +148,21 @@ def promote_capture(event: str) -> Path:
             f"no observed payload for {event!r} in {CAPTURE_INBOX}. Run the ingest "
             "against test mode with a tunnel first."
         )
+
+    text = source.read_text(encoding="utf-8")
+    marker = looks_fabricated(text)
+    if marker is not None:
+        raise ValueError(
+            f"refusing to promote {event!r}: the payload contains {marker!r}, which is "
+            f"one of this repository's own test identifiers. It was almost certainly "
+            f"written by the test suite rather than by Razorpay. Promoting it would "
+            f"make the manifest claim a shape was observed when it was invented "
+            f"(INC-006). Delete {source} and capture a real one."
+        )
+
     CAPTURED_DIR.mkdir(parents=True, exist_ok=True)
     target = CAPTURED_DIR / _safe_name(event)
-    target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8", newline="")
+    target.write_text(text, encoding="utf-8", newline="")
     return target
 
 

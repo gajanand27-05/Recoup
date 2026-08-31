@@ -75,6 +75,45 @@ def test_promoting_something_never_observed_is_refused(isolated):
         capture.promote_capture("subscription.charged")
 
 
+def test_promoting_a_payload_carrying_our_own_test_ids_is_refused(isolated):
+    """The residual risk after INC-006, closed at the gate rather than after.
+
+    The inbox is written by ANY run with transport="real", including the test
+    suite, so it legitimately fills with fabricated payloads — and `captures`
+    lists them as awaiting promotion. Refusing here beats catching it later.
+    """
+    capture_payload(
+        "subscription.halted",
+        json.dumps({
+            "event": "subscription.halted",
+            "payload": {"subscription": {"entity": {"id": "sub_test_001"}}},
+        }).encode(),
+    )
+    with pytest.raises(ValueError, match="sub_test_"):
+        capture.promote_capture("subscription.halted")
+
+    assert manifest()["subscription.halted"].startswith("INFERRED")
+
+
+@pytest.mark.parametrize(
+    "identifier",
+    ["sub_test_001", "cust_sim_1_000042", "evt_fl_001", "sub_GOLDEN", "TPL_DEMO"],
+)
+def test_every_family_of_our_own_identifiers_is_recognised(identifier):
+    assert capture.looks_fabricated(f'{{"id": "{identifier}"}}') is not None
+
+
+def test_a_plausible_razorpay_payload_is_not_flagged():
+    # Real ids look like sub_MNoP5Zd0OQ0MOs -- no underscore-delimited test prefix.
+    body = json.dumps({
+        "event": "subscription.halted",
+        "payload": {"subscription": {"entity": {
+            "id": "sub_MNoP5Zd0OQ0MOs", "customer_id": "cust_MNoP4xY2aB1cDe",
+        }}},
+    })
+    assert capture.looks_fabricated(body) is None
+
+
 def test_the_repository_holds_no_fabricated_captures():
     """Evidence must come from a real run, never from the test suite.
 
@@ -217,6 +256,34 @@ def test_a_hand_edited_manifest_would_be_caught():
 
 
 # --- the mechanism has a consumer ---------------------------------------------------
+
+
+def test_the_captures_command_lists_status_without_promoting(isolated, capsys):
+    capture_payload("payment_link.paid", b'{"event": "payment_link.paid"}')
+    from recoup.cli import main
+
+    assert main(["captures"]) == 0
+    out = capsys.readouterr().out
+    assert "payment_link.paid" in out
+    assert "awaiting promotion" in out
+    assert manifest()["payment_link.paid"].startswith("INFERRED"), (
+        "listing must not promote anything"
+    )
+
+
+def test_the_captures_command_promotes_by_name(isolated, capsys):
+    capture_payload("payment_link.paid", b'{"event": "payment_link.paid"}')
+    from recoup.cli import main
+
+    assert main(["captures", "--promote", "payment_link.paid"]) == 0
+    assert manifest()["payment_link.paid"] == "CAPTURED"
+
+
+def test_promoting_something_never_observed_exits_nonzero(isolated, capsys):
+    from recoup.cli import main
+
+    assert main(["captures", "--promote", "subscription.charged"]) == 1
+    assert "no observed payload" in capsys.readouterr().err
 
 
 def test_the_ingest_calls_capture_for_a_real_transport():

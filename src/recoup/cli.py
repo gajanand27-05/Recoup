@@ -62,6 +62,49 @@ def cmd_verify_ledger(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_captures(args: argparse.Namespace) -> int:
+    """Show observed vs committed payload shapes, and promote by name.
+
+    Promotion is deliberately a command someone runs, never something that
+    happens automatically. Moving a payload into the evidence directory asserts
+    *this is what Razorpay actually sent*, and that assertion should require a
+    person — the test suite once made it by accident (INC-006).
+    """
+    from recoup.execute.capture import (
+        CAPTURE_INBOX,
+        manifest,
+        pending_captures,
+        promote_capture,
+    )
+
+    if args.promote:
+        for event in args.promote:
+            try:
+                target = promote_capture(event)
+            except (FileNotFoundError, ValueError) as exc:
+                # A refusal is an answer, not a crash. Print it and exit 1.
+                print(f"REFUSED  {exc}", file=sys.stderr)
+                return 1
+            print(f"promoted {event} -> {target}")
+        return 0
+
+    print(f"inbox (observed, not evidence): {CAPTURE_INBOX}")
+    pending = pending_captures()
+    print(f"awaiting promotion: {', '.join(pending) if pending else 'none'}\n")
+
+    for event, status in manifest().items():
+        print(f"  {event:26} {status}")
+
+    if pending:
+        print(
+            "\nPromote with:\n"
+            f"  python -m recoup.cli captures --promote {' '.join(pending)}\n"
+            "Check each payload first -- promoting it makes it a claim about "
+            "what Razorpay sends."
+        )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="recoup")
     parser.add_argument("--db", default=DEFAULT_DB)
@@ -80,6 +123,16 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="read the expected head from a committed runs/<run_id>.head anchor file",
     )
+
+    p_cap = sub.add_parser(
+        "captures", help="show observed vs committed webhook payload shapes"
+    )
+    p_cap.add_argument(
+        "--promote",
+        nargs="+",
+        metavar="EVENT",
+        help="move an observed payload into committed evidence (a deliberate act)",
+    )
     return parser
 
 
@@ -88,6 +141,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "verify-ledger":
         return cmd_verify_ledger(args)
+    if args.command == "captures":
+        return cmd_captures(args)
     parser.error(f"unknown command {args.command}")
     return 2
 
