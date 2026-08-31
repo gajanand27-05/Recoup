@@ -36,6 +36,30 @@ engineers.
 The ledger is append-only and hash-chained. `recoup verify-ledger` recomputes the chain and
 prints the head hash.
 
+## Verifying the freeze
+
+The simulator was frozen before the agent was written. To check that rather than take it:
+
+```bash
+python tasks.py verify-sim     # recomputes sha256(simulator/), fails on any drift
+git log --all --diff-filter=A --format='%h %ai' -- src/recoup/agent/ | tail -1
+git log --all --diff-filter=A --format='%h %ai' -- PARAMS.lock.json  | tail -1
+```
+
+`--diff-filter=A` finds the commit that *added* each path, so it is not fooled by a file that
+was created and later deleted. CI runs both checks on every push.
+
+**The `sim-freeze-v1` tag is not the evidence.** An annotated tag's date is written by whoever
+creates it and can be set to anything. What is load-bearing is the pushed commit history and
+GitHub's own record of when those commits arrived and when CI ran on them. The tag is a
+convenient label pointing at evidence that stands without it.
+
+If a defect is found in the simulator after freezing, the tag is **not** moved — a
+`sim-freeze-v2` is cut and both are kept, with the reason in
+[`INCIDENTS.md`](INCIDENTS.md). This has already happened once *before* the tag was public
+(INC-004: the hash was computed with a platform-dependent file ordering and was not
+reproducible off Windows).
+
 ## Limitations
 
 Stated here rather than left to be found. This section grows as the build does; nothing is
