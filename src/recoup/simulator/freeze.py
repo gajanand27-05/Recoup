@@ -43,16 +43,37 @@ def _normalise(data: bytes) -> bytes:
     return data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
 
 
+def _relative_key(path: Path) -> str:
+    """Sort key: the relative path as a POSIX string, compared byte-for-byte.
+
+    NOT `sorted(paths)`. `PurePath.__lt__` compares `_str_normcase`, which is
+    case-INSENSITIVE on Windows and case-SENSITIVE on POSIX. With `PARAMS.md`
+    beside `curve.py` and `__init__.py`, that produces two different orderings:
+
+        Windows : __init__.py, curve.py, generator.py, PARAMS.md, provenance.py
+        POSIX   : PARAMS.md, __init__.py, curve.py, generator.py, provenance.py
+
+    Identical bytes, different iteration order, different digest. The freeze was
+    therefore unverifiable on any machine but the one that produced it -- which
+    is every machine that matters, since the point of the hash is that someone
+    else can recompute it.
+    """
+    return path.relative_to(SIM_DIR).as_posix()
+
+
 def _hashed_files() -> list[Path]:
-    """Files covered by the freeze, in a stable order.
+    """Files covered by the freeze, in a platform-independent order.
 
     Includes PARAMS.md: editing a source URL after the freeze is drift, because
     the provenance document is part of what was frozen.
     """
     return sorted(
-        p
-        for p in SIM_DIR.rglob("*")
-        if p.is_file() and not any(part in _EXCLUDE for part in p.parts)
+        (
+            p
+            for p in SIM_DIR.rglob("*")
+            if p.is_file() and not any(part in _EXCLUDE for part in p.parts)
+        ),
+        key=_relative_key,
     )
 
 
@@ -60,7 +81,7 @@ def hash_simulator_dir() -> str:
     """sha256 over the sorted, line-ending-normalised contents of simulator/."""
     h = hashlib.sha256()
     for path in _hashed_files():
-        h.update(path.relative_to(SIM_DIR).as_posix().encode("utf-8"))
+        h.update(_relative_key(path).encode("utf-8"))
         h.update(_normalise(path.read_bytes()))
     return h.hexdigest()
 

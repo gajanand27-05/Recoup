@@ -58,6 +58,61 @@ def test_freeze_py_is_excluded_from_its_own_hash():
     assert "freeze.py" not in [p.name for p in _hashed_files()]
 
 
+def test_files_are_hashed_in_a_platform_independent_order():
+    """The hash must not depend on which OS computed it.
+
+    `sorted(Path objects)` compares `_str_normcase` -- case-INSENSITIVE on
+    Windows, case-SENSITIVE on POSIX. With `PARAMS.md` beside `curve.py` and
+    `__init__.py` that yields two different orderings from identical bytes:
+
+        Windows : __init__.py, curve.py, generator.py, PARAMS.md, provenance.py
+        POSIX   : PARAMS.md, __init__.py, curve.py, generator.py, provenance.py
+
+    CI caught this as SIMULATOR DRIFT on a clean checkout of unchanged files.
+    """
+    from recoup.simulator.freeze import _hashed_files, _relative_key
+
+    keys = [_relative_key(p) for p in _hashed_files()]
+    assert keys == sorted(keys), "hashed files are not in byte-sorted relative-path order"
+
+
+def test_the_ordering_is_the_one_posix_would_produce():
+    # Pinned against the discriminating case: an uppercase name, an underscore
+    # name and lowercase names in one directory. Any of the three orderings a
+    # naive sort might produce differs here.
+    from recoup.simulator.freeze import _hashed_files, _relative_key
+
+    names = [_relative_key(p) for p in _hashed_files()]
+    assert names == [
+        "PARAMS.md",
+        "__init__.py",
+        "curve.py",
+        "generator.py",
+        "provenance.py",
+    ], names
+
+
+def test_sorting_paths_directly_would_have_been_wrong_on_this_platform():
+    """Demonstrates the bug rather than describing it.
+
+    On Windows these two orderings differ and this test proves the fix matters.
+    On Linux they coincide, so it asserts only that the fixed order is correct --
+    which is the honest thing for a platform-specific defect.
+    """
+    import sys
+
+    from recoup.simulator.freeze import _hashed_files, _relative_key
+
+    fixed = [_relative_key(p) for p in _hashed_files()]
+    naive = [_relative_key(p) for p in sorted(_hashed_files())]
+    assert fixed == sorted(fixed)
+    if sys.platform == "win32":
+        assert fixed != naive, (
+            "expected Windows path ordering to differ from byte ordering; if this "
+            "fails the discriminating filenames have gone and the test is now blind"
+        )
+
+
 def test_params_md_is_inside_the_hash():
     # The provenance document is part of what is frozen. Editing a source URL
     # after the freeze must be drift.

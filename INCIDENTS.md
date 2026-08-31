@@ -290,3 +290,91 @@ is worse than an unpushed one — the point of the tag is that it did not move.
 **Worth saying plainly:** 10 of 17 parameters are `ASSUMPTION`. That is the honest
 description of this simulator, it is on the face of `SIMULATOR_FREEZE.md`, and it is why the
 sensitivity sweep in Task 23b is not optional.
+
+> **Superseded by INC-004.** The hash recorded above, `4cb02cb7…`, was computed with a
+> platform-dependent file ordering and is **not reproducible off Windows**. The corrected
+> hash is `a45ffdec3b83fab5dd7ec452a23b5d1e22565002c08d7c0b070a5f765f6eaee5`. The original
+> figure is left here rather than edited, because a freeze record that quietly restates its
+> own hash is worth nothing.
+
+---
+
+## INC-004 — The freeze hash was not reproducible on any machine but mine
+
+**2026-08-31 · severity: high (the freeze claim was false for every third party) · status: fixed**
+
+**What happened**
+
+CI failed on three consecutive commits — `c25471a`, `95b8a9c`, `e8cc909` — with:
+
+```
+SIMULATOR DRIFT: simulator/ has changed since the freeze.
+  locked:  4cb02cb7ea9ad140e051c2de0ae6683d0c0bb80d4b55c0386f8f6cb0028a4e14
+  current: a45ffdec3b83fab5dd7ec452a23b5d1e22565002c08d7c0b070a5f765f6eaee5
+make: *** [Makefile:22: verify-sim] Error 1
+```
+
+Nothing had changed. A fresh clone had byte-identical files of identical sizes.
+
+**Cause**
+
+`hash_simulator_dir()` iterated `sorted(paths)`. `PurePath.__lt__` compares `_str_normcase`,
+which is **case-insensitive on Windows and case-sensitive on POSIX**. With `PARAMS.md`
+sitting beside `curve.py` and `__init__.py`, the two platforms enumerate the same files in
+different orders:
+
+```
+Windows : __init__.py, curve.py, generator.py, PARAMS.md, provenance.py
+POSIX   : PARAMS.md, __init__.py, curve.py, generator.py, provenance.py
+```
+
+Identical bytes, different iteration order, different digest. Both values were reproduced
+locally by re-running the hash under each ordering.
+
+**Why this is worse than a red build**
+
+The freeze exists so that *someone else* can recompute the hash and confirm the simulator has
+not moved. A hash reproducible only on the machine that produced it is not evidence of
+anything — it is a number in a document. Any judge cloning the repository and running
+`verify-sim` would have been told the simulator had been tampered with.
+
+There is a sharper irony. Two days earlier I deliberately normalised line endings in this
+same function, reasoning explicitly about cross-platform reproducibility, and wrote a test
+for it. I checked one axis of portability and never asked what the other one was.
+
+**Fix**
+
+Sort by the relative path as a POSIX string, compared byte-for-byte, rather than by `Path`
+comparison. Corrected hash `a45ffdec3b83…`, confirmed to reproduce in an independent clone.
+The lock and `SIMULATOR_FREEZE.md` were rewritten and `sim-freeze-v1` moved.
+
+**Moving the tag was possible only because it had not been pushed.** That was a deliberate
+choice at freeze time — "a pushed tag that later has to move is worse than an unpushed one" —
+and it is the reason this cost a re-tag rather than a rewritten public history.
+
+**What was added**
+
+* A test asserting the hashed files are in byte-sorted relative-path order.
+* A test pinning the exact expected order, against the discriminating case (an uppercase
+  name, an underscore name, and lowercase names in one directory).
+* A test that, on Windows, asserts the naive ordering *differs* from the fixed one — so if
+  the discriminating filenames ever disappear, the test says it has gone blind rather than
+  passing silently.
+
+**How it was found — and how it should have been**
+
+By CI, and reported to Gajanand by email. Not by me: I ran the local suite, saw green, and
+reported the block complete without ever opening the CI result. The local suite could not
+have caught this, since on Windows the lock and the computation agreed with each other — but
+`test_the_repository_lock_verifies_if_it_exists` would have failed on the Linux runner too,
+so the signal existed and I did not look at it.
+
+**Lesson kept**
+
+Two, and the second is the important one.
+
+1. Any hash over a *set* of files must fix the ordering explicitly. Sorting paths is not
+   ordering; it is asking the filesystem's collation rules for an opinion.
+2. **"Tests pass locally" is not "the build is green."** Reporting a block complete without
+   checking CI is reporting on a proxy. Check the artifact — which is the rule this build
+   has been applying to code all week, and I did not apply it to my own reporting.

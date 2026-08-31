@@ -5,9 +5,9 @@ and `verify-sim` in CI are what make that a checkable claim rather than an asser
 
 | | |
 |---|---|
-| `sha256(simulator/)` | `4cb02cb7ea9ad140e051c2de0ae6683d0c0bb80d4b55c0386f8f6cb0028a4e14` |
-| Frozen at (UTC) | 2026-08-30T15:34:46.408290Z |
-| Commit | `e0a38e209ed4d7d4b4934ea6a809785958a21379` |
+| `sha256(simulator/)` | `a45ffdec3b83fab5dd7ec452a23b5d1e22565002c08d7c0b070a5f765f6eaee5` |
+| Frozen at (UTC) | 2026-08-31T01:17:24.467595Z |
+| Commit | `e8cc9097a7ea0e8a5f7ec1d3e283f2784f28f190` |
 | Tag | `sim-freeze-v1` |
 | Parameters locked | 17 |
 
