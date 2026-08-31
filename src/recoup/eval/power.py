@@ -127,6 +127,37 @@ def design_table(
     ]
 
 
+DESIGN_TABLE_BEGIN = "<!-- BEGIN generated: design-table -->"
+DESIGN_TABLE_END = "<!-- END generated: design-table -->"
+
+
+def design_table_markdown(chosen: int = 1000) -> str:
+    """The EXPERIMENT.md table, rendered from the computation.
+
+    Delimited by markers so a test can extract the committed block and compare it
+    against a fresh render. Without that, the table silently goes stale the moment
+    `p1` moves in the frozen registry -- and `p1` is read from the registry
+    precisely so the baseline is provably the sourced one. A hand-typed table
+    would quietly break the property the registry lookup exists to provide.
+    """
+    lines = [
+        DESIGN_TABLE_BEGIN,
+        f"| N/arm | Total N | MDE at p1 = {BASELINE_P1}, alpha = {DEFAULT_ALPHA}, "
+        f"power = {DEFAULT_POWER} |",
+        "|---|---|---|",
+    ]
+    for row in design_table():
+        n = row["n_per_arm"]
+        mark = "**" if n == chosen else ""
+        chose = "  <- chosen" if n == chosen else ""
+        lines.append(
+            f"| {mark}{n:,}{mark} | {mark}{row['total_n']:,}{mark} | "
+            f"{mark}{row['mde'] * 100:.2f} pp{mark}{chose} |"
+        )
+    lines.append(DESIGN_TABLE_END)
+    return "\n".join(lines)
+
+
 def main() -> int:  # pragma: no cover - convenience entry point
     print(f"p1 = {BASELINE_P1}  alpha = {DEFAULT_ALPHA}  power = {DEFAULT_POWER}")
     for row in design_table():
@@ -134,6 +165,8 @@ def main() -> int:  # pragma: no cover - convenience entry point
             f"  {row['n_per_arm']:5d}/arm (N={row['total_n']:5d})"
             f" -> MDE {row['mde'] * 100:5.2f}pp"
         )
+    print()
+    print(design_table_markdown())
     return 0
 
 
