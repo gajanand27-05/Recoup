@@ -13,6 +13,14 @@ would miss.
 The label IS legitimately used elsewhere — false-positive cost, randomisation
 balance — in modules that never compute lift. See `eval/diagnostics.py`.
 
+⚠️ **If you are about to write `lift.py`: the firewall has been exercised.**
+Because `lift.py` does not exist, the guards protecting it have no subject to
+fail on and would pass vacuously. So `tests/test_firewall.py` writes a genuinely
+violating `lift.py` into this package on every run, confirms both the import
+closure and the label scan catch it, and deletes it — once for a direct import of
+the generator, once for an indirect route through a helper, which a direct-import
+check would miss. You are not the first thing to test them.
+
 Why `amount_paise` is passed in rather than looked up
 -----------------------------------------------------
 `SubscriptionState` deliberately carries no subscription-level amount: amount is

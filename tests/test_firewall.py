@@ -207,6 +207,20 @@ def test_a_subscription_with_no_arm_cannot_enter_a_lift_calculation():
 
 
 def test_no_module_reaches_a_forbidden_import():
+    """⚠️ VALIDATED BY PLANTING. `lift.py` does not exist yet.
+
+    Until it does, this check is vacuous for the rule that matters — there is no
+    subject to fail on. It has been exercised anyway, by writing a genuinely
+    violating `lift.py` into `src/recoup/eval/` and confirming both the import
+    closure and the label scan catch it. See:
+
+        test_the_firewall_fires_on_a_violating_lift_module
+        test_the_firewall_fires_on_an_indirect_violation
+
+    Those two run on every suite, so this is not a claim about something done once
+    in the past — they re-plant, re-check, and delete on every run. If you are
+    about to write `lift.py`, they are your evidence that the firewall works.
+    """
     problems = []
     for module, forbidden in FORBIDDEN_IMPORTS.items():
         if module_path(module) is None:
@@ -227,6 +241,13 @@ def test_views_does_not_import_the_generator():
 
 
 def test_the_label_is_only_mentioned_where_it_is_allowed():
+    """⚠️ VALIDATED BY PLANTING — see the note on the import check above.
+
+    This one is NOT vacuous today: it scans every module that exists. But the
+    module it exists to police, `lift.py`, is not among them, so its reach against
+    that module is established by the planted-failure tests at the bottom of this
+    file rather than by this one passing.
+    """
     offenders = {}
     for module in all_recoup_modules():
         if module in LABEL_ALLOWED_IN:
