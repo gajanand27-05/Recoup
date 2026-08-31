@@ -36,10 +36,64 @@ engineers.
 The ledger is append-only and hash-chained. `recoup verify-ledger` recomputes the chain and
 prints the head hash.
 
+## Limitations
+
+Stated here rather than left to be found. This section grows as the build does; nothing is
+removed from it.
+
+### The counterfactual is assumed, not measured
+
+The headline claim is a *difference* between two arms, so it rests on what would have happened
+with no intervention at all. In the simulator that is `would_self_recover`, generated from two
+numbers:
+
+| Parameter | Value | Swept over |
+|---|---|---|
+| `self_recovery_rate_soft` | 0.18 | 0.05 – 0.35 |
+| `self_recovery_rate_hard` | 0.03 | 0.00 – 0.10 |
+
+**Neither is sourced.** Nothing published gives a post-halt, no-outreach recovery rate — post-halt
+means the processor has stopped retrying, so any recovery is the customer acting unprompted, and
+merchants who do nothing at that point do not publish what happens next.
+
+These two numbers set the denominator of the entire lift claim. They are swept first and widest
+in the sensitivity analysis, and the analysis reports the **sign** of the effect across the full
+range, not only its magnitude: if there is any corner of the declared ranges where the treatment
+arm loses, that is reported rather than excluded.
+
+### Most of the simulator's parameters are assumptions
+
+Of 17 frozen generative parameters: **4 MEASURED** (published figure, stated population, URL),
+**10 ASSUMPTION** (not sourced, each with a declared sweep range), 3 derived or definitional.
+
+That ratio is on the face of [`SIMULATOR_FREEZE.md`](SIMULATOR_FREEZE.md), and every parameter's
+class, source and reasoning — including figures that were located and **deliberately rejected** —
+is in [`src/recoup/simulator/PARAMS.md`](src/recoup/simulator/PARAMS.md).
+
+### Two sources may measure the same decay twice
+
+The day-offset recovery curve (Baremetrics, by day within a dunning sequence) and the per-attempt
+decay (Churnkey, by email index) are not independent axes: position in a sequence and days elapsed
+are the same underlying thing measured two ways. Multiplying both almost certainly double-counts
+some of the decline, and how much is unrecoverable from published aggregates.
+
+We did not resolve this. We made it a swept parameter (`attempt_decay_compounding`) and defaulted
+it to **full compounding**, which lowers modelled recovery in both arms and therefore shrinks our
+own reported effect. The claim is "we chose the parameterisation that reduces our result", not
+"we established the correct one".
+
+### Simulated outcomes are never pooled with real ones
+
+Every ledger row carries `transport` — `real` or `sim` — and the two are never combined in a
+reported figure. The label is declared by the caller and defaults to `sim`, because the two
+mistakes are not symmetric: calling a fixture `real` manufactures evidence that the system ran
+against a live processor, while calling a real event `sim` only forfeits a claim we were entitled
+to make.
+
 ## Status
 
-Under construction for the 5 September 2026 deadline. This README is expanded as the build
-progresses; architecture, reproduction steps and a full limitations section land before submission.
+Under construction for the 5 September 2026 deadline. Architecture and reproduction steps land
+before submission; the limitations above are current.
 
 ## Development
 

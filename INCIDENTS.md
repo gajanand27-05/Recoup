@@ -378,3 +378,62 @@ Two, and the second is the important one.
 2. **"Tests pass locally" is not "the build is green."** Reporting a block complete without
    checking CI is reporting on a proxy. Check the artifact — which is the rule this build
    has been applying to code all week, and I did not apply it to my own reporting.
+
+---
+
+## INC-005 — A swept parameter with no consumer manufactures evidence
+
+**2026-08-31 · severity: high · status: instance fixed, class now checked**
+
+Promoted from INC-003 F-1, because the instance matters far less than the class and the
+framing there undersold it.
+
+**The instance**
+
+`residual_bucket_is_soft` was registered as an `ASSUMPTION` with a declared sweep range of
+0–30% and implemented nowhere. No code read it.
+
+**Why this is not just "an unused parameter"**
+
+An unregistered constant **omits evidence**: something is unexamined and nothing claims
+otherwise. A registered, swept, unimplemented parameter **generates false evidence**, and it
+does so in the analysis specifically built to find weakness.
+
+Task 23b sweeps every `ASSUMPTION` and reports how much the result moves. A parameter nothing
+reads produces a **flat line across its entire range**. A flat line is the signature of
+robustness. So the sensitivity analysis would have reported its strongest, most reassuring
+result precisely where the model was emptiest — and the more such parameters existed, the
+more robust the system would have appeared.
+
+It does not fail. It does not warn. It reads as a finding.
+
+**The class**
+
+*Any parameter that is declared, varied, and not consumed.* This is worth re-checking
+deliberately **after Task 23b is written**, not only before, because the sweep code is the
+component that turns the defect into a published claim, and a parameter can lose its consumer
+later — through a refactor, a renamed constant, a branch that stops being reached — long after
+it was correctly wired.
+
+**Fix and enforcement**
+
+Renamed to `residual_hard_fraction` and read by `generate_scenarios`.
+`provenance.unread_assumptions()` fails any swept `ASSUMPTION` whose named constant does not
+exist, and the registry gained `constant_key` so a parameter living inside a container
+(`CHANNEL_MULTIPLIER["sms"]`) can name the entry the sweep must move. That check immediately
+caught two more: `channel_multiplier_sms` and `_whatsapp` had been swept assumptions naming
+no constant at all.
+
+**Standing rule, recorded as A-017**
+
+> Before reporting any parameter as insensitive, confirm the sweep actually moved the model.
+> An unchanged result is informative only if the input changed.
+
+Task 23b must therefore assert, per parameter, that at least one swept value produced a
+different batch or a different outcome. A parameter that cannot be shown to move anything is
+reported as **unwired**, not as **insensitive**.
+
+**Lesson kept**
+
+The dangerous failures are not the ones that break. They are the ones that succeed in the
+shape of good news.
