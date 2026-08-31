@@ -1,0 +1,185 @@
+# Policy rules.
+#
+# Every rule carries a legal class. See DECISION.md A-006 for why: research caught
+# this design about to assert three conventions as regulations, and overclaiming a
+# best practice as law is the most likely failure mode of a compliance document.
+#
+#   HARD_LAW                  regulation text binding on us
+#   INDUSTRY_PRACTICE         enforced by a platform or operator, not by statute
+#   BEST_PRACTICE_BY_ANALOGY  binds someone else; we adopt it voluntarily
+#   SELF_IMPOSED              our own restraint, no external source
+#
+# A SELF_IMPOSED rule must NOT carry a source_url. A restraint with a plausible
+# citation beside it reads as externally required, which is the same overclaim in
+# the other direction.
+#
+# SCOPE (D-030): this system operates strictly AFTER the mandate rail gives up.
+# It issues no debits. RBI-001/002/003 and the NPCI UPI Autopay retry caps are
+# therefore out of scope and deliberately absent from this file. A test asserts
+# they stay absent -- re-adding one would be scope creep dressed as diligence, and
+# would invite the question of why a system that never debits models debit rules.
+#
+# Predicates are Python expressions. They may reference only: msg, customer, link,
+# action, state, today, contains_promotional_tokens. A predicate naming anything
+# else is a typo that would silently always-pass or always-veto.
+
+version: 1
+scope: "post-subscription.halted outreach only; no debit is ever initiated"
+
+rules:
+  # ---------------------------------------------------------------- TCCCPR/DLT
+  - id: DLT-001
+    predicate: "msg.dlt_template_id is not None and msg.dlt_template_approved"
+    class: HARD_LAW
+    source_url: "https://indiankanoon.org/doc/60694660/"
+    retrieved: 2026-08-28
+    reason: >
+      TCCCPR 2018 Reg. 10 and Reg. 32 require content templates to be registered
+      on DLT before use. Unregistered templates are dropped by the operator.
+
+  - id: DLT-003
+    predicate: "msg.category == 'SERVICE_IMPLICIT'"
+    class: HARD_LAW
+    source_url: "https://msg91.com/help/dlt-registration-in-india/dlt-template-scrubbing-filtering-rules"
+    retrieved: 2026-08-28
+    reason: >
+      Service-Implicit messages are permitted all-day (24 hours) and are exempt
+      from DND scrubbing. A payment-failure notice to an existing subscriber
+      qualifies under Reg. 2(bh). No time window applies.
+
+  - id: DLT-004
+    predicate: "msg.category not in ('PROMOTIONAL','SERVICE_EXPLICIT') or 10 <= msg.send_hour_ist < 21"
+    class: HARD_LAW
+    source_url: "https://www.textguru.in/blog/service-explicit-message-delivery-trai-update"
+    retrieved: 2026-08-28
+    reason: >
+      TCCCPR Schedule-II 3(1) sets 00:00-06:00, 06:00-08:00, 08:00-10:00 and
+      21:00-24:00 as default-OFF, giving a permitted window of 10:00-21:00 IST
+      for promotional and service-explicit traffic. Note this is 10:00, not the
+      widely-repeated 09:00. Operators reject outside it with error 651.
+
+  - id: DLT-007
+    predicate: "not contains_promotional_tokens(msg.body)"
+    class: HARD_LAW
+    source_url: "https://msg91.com/help/dlt-content-template-faqs"
+    retrieved: 2026-08-28
+    reason: >
+      Promotional content mixed with service content reclassifies the entire
+      message as Promotional, forfeiting Service-Implicit status and with it the
+      24x7 delivery and DND exemption. This is the rule the staged failure demo
+      fires: an LLM reaching for persuasion destroys the regulatory status of
+      the message.
+
+  - id: DLT-008
+    predicate: "msg.body_matches_registered_template"
+    class: HARD_LAW
+    source_url: "https://trai.gov.in/advice-to-senders"
+    retrieved: 2026-08-28
+    reason: >
+      Message body must match the registered template exactly; variables are
+      permitted only in registered positions.
+
+  # ------------------------------------------------------------------ WhatsApp
+  - id: WA-002
+    predicate: "msg.channel != 'whatsapp' or msg.wa_template_category == 'UTILITY'"
+    class: INDUSTRY_PRACTICE
+    source_url: "https://developers.facebook.com/documentation/business-messaging/whatsapp/templates/template-categorization"
+    retrieved: 2026-08-28
+    reason: >
+      A payment-failure notice is a Utility template. Sending it as Marketing
+      incurs the higher rate and Marketing-tier restrictions; as Authentication
+      it violates category policy.
+
+  - id: WA-003
+    predicate: "msg.channel != 'whatsapp' or customer.whatsapp_optin"
+    class: INDUSTRY_PRACTICE
+    source_url: "https://developers.facebook.com/documentation/business-messaging/whatsapp/getting-opt-in"
+    retrieved: 2026-08-28
+    reason: >
+      Business-initiated WhatsApp messages require a recorded opt-in that names
+      the business and states what will be sent. This is Meta platform policy,
+      not Indian statute: the penalty is template rejection and a falling quality
+      rating rather than a regulatory one, which is why the class is
+      INDUSTRY_PRACTICE. Without opt-in, WhatsApp is simply unavailable as a
+      channel and the agent must fall back to SMS or email.
+
+  # ------------------------------------------------------------------ Razorpay
+  - id: RZP-001
+    predicate: "link.reminder_count <= 3"
+    class: INDUSTRY_PRACTICE
+    source_url: "https://razorpay.com/docs/payments/payment-links/reminders/"
+    retrieved: 2026-08-28
+    reason: >
+      Razorpay permits a maximum of 3 automated reminders per payment link. This
+      is a platform limit, not a legal one: the fourth reminder is not rejected
+      with an error, it simply never goes out. An agent that planned a fifth
+      would believe it had contacted the customer when it had not, so the veto
+      exists to make the ceiling visible rather than silent.
+
+  - id: RZP-002
+    predicate: "not action.uses_rzp_reminder or action.send_hour_ist in (11, 15, 16)"
+    class: INDUSTRY_PRACTICE
+    source_url: "https://razorpay.com/docs/payments/payment-links/reminders/"
+    retrieved: 2026-08-28
+    reason: >
+      Razorpay sends automated reminders only between 11:00-12:00 and
+      15:00-17:00 IST. Scheduling outside those windows silently does nothing.
+
+  # ---------------------------------------------------------- RBI, by analogy
+  - id: RBI-005
+    predicate: "not msg.is_coercive and (msg.channel != 'voice' or 8 <= msg.send_hour_ist < 19)"
+    class: BEST_PRACTICE_BY_ANALOGY
+    source_url: "https://taxguru.in/rbi/outsourcing-financial-services-responsibilities-regulated-entities-employing-recovery-agents.html"
+    retrieved: 2026-08-28
+    reason: >
+      RBI/2022-23/108 prohibits coercive recovery practices and limits contact to
+      08:00-19:00. It binds Commercial Banks, RRBs, Co-op Banks, NBFCs, ARCs and
+      AIFIs and their outsourced agents. A SaaS merchant chasing a failed
+      subscription is NOT a regulated entity and is NOT legally bound by it. We
+      adopt it voluntarily for voice contact. It is not law for us and this file
+      does not claim it is.
+
+  # ----------------------------------------------------------- stopping rules
+  - id: STOP-001
+    predicate: "state.attempts < 5"
+    class: SELF_IMPOSED
+    reason: >
+      Maximum 5 outreach attempts per halted subscription. The sourced per-attempt
+      recovery curve is effectively flat past attempt 5 (1.5% incremental), so
+      further contact costs money and goodwill for no measurable return.
+
+  - id: STOP-002
+    predicate: "state.spend_paise < 5000"
+    class: SELF_IMPOSED
+    reason: >
+      Maximum spend of Rs 50 per customer per recovery cycle. A hard ceiling the
+      agent cannot reason past, regardless of the amount outstanding.
+
+  - id: STOP-003
+    predicate: "not state.opted_out"
+    class: HARD_LAW
+    source_url: "https://indiankanoon.org/doc/60694660/"
+    retrieved: 2026-08-28
+    reason: >
+      Opt-out is permanent and absolute. Matched deterministically upstream of
+      the LLM: a regulatory hard stop must never depend on a model's reading
+      comprehension.
+
+  - id: STOP-004
+    predicate: "state.ptp_date is None or today > state.ptp_date"
+    class: SELF_IMPOSED
+    reason: >
+      When a customer promises to pay by a date, contact is suppressed until the
+      day after. Chasing someone who has already committed is how goodwill is
+      destroyed and how complaints are generated.
+
+  - id: SELF-001
+    predicate: "state.messages_today < 1"
+    class: SELF_IMPOSED
+    reason: >
+      At most one message per customer per day across all channels. No regulation
+      caps SI frequency, but TRAI's 2nd Amendment lowered the UCC complaint
+      threshold to 5 complaints in 10 days with penalties up to Rs 10 lakh and
+      industry-wide suspension. A high-volume ladder can trigger complaint-driven
+      enforcement while remaining technically compliant. Labelled SELF_IMPOSED so
+      nobody later mistakes it for law.
