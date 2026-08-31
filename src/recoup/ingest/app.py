@@ -53,6 +53,7 @@ from contextlib import asynccontextmanager, suppress
 from fastapi import FastAPI, Header, Request, Response
 
 from recoup.clock import utc_now_iso
+from recoup.execute.capture import capture_payload
 from recoup.ingest.signature import verify_signature
 from recoup.ledger.store import Ledger
 
@@ -170,6 +171,18 @@ def process_one(app: FastAPI, job: dict) -> str | None:
     """
     conn = app.state.conn
     event_id = job["event_id"]
+
+    # Capture the payload SHAPE when these are genuinely from Razorpay. Branch
+    # (b) of D-033 replays `subscription.halted` from an inferred fixture, so
+    # every shape we can really observe narrows the inferred surface. First
+    # write wins; this never overwrites what was seen first.
+    if app.state.transport == "real":
+        try:
+            body = json.loads(job["raw"])
+            if isinstance(body, dict) and body.get("event"):
+                capture_payload(body["event"], job["raw"])
+        except (ValueError, UnicodeDecodeError):
+            pass  # unparseable bodies are recorded in the ledger, not as fixtures
 
     with app.state.lock:
         row = conn.execute(

@@ -135,6 +135,36 @@ it to **full compounding**, which lowers modelled recovery in both arms and ther
 own reported effect. The claim is "we chose the parameterisation that reduces our result", not
 "we established the correct one".
 
+### One webhook payload shape is inferred, not observed
+
+The real-transport demo issues genuine Razorpay test-mode Payment Links against genuine
+subscriptions. It cannot produce a genuine `subscription.halted`, because test mode will not
+simulate a *failed* subscription charge — so that one event is **replayed from a fixture built
+by reading the documentation**.
+
+That matters because the ingest's id-extraction is then validated against our reading of the
+docs rather than against a payload Razorpay actually sent. It is stated rather than engineered
+around, and narrowed as far as it can be: the other three shapes *are* obtainable in test mode
+and are captured on first sight.
+
+<!-- BEGIN generated: capture-manifest -->
+| Event | Payload shape |
+|---|---|
+| `subscription.halted` | INFERRED (not capturable in test mode — see D-033 branch (b)) |
+| `subscription.activated` | INFERRED (capturable — run the demo against test mode) |
+| `subscription.charged` | INFERRED (capturable — run the demo against test mode) |
+| `payment_link.paid` | INFERRED (capturable — run the demo against test mode) |
+<!-- END generated: capture-manifest -->
+
+This table is **generated from the filesystem**, not maintained by hand, and is compared
+against a fresh render by `tests/test_capture.py`. It cannot go stale: the moment a payload is
+captured, that test fails until the table is regenerated.
+
+**The claim the demo supports, stated exactly:** *the outreach path ran against Razorpay —
+real payment links, really issued, with real auth and real `reference_id` collision behaviour.
+The failure sequence that triggers it was replayed.* That is weaker than "the loop ran
+end-to-end against Razorpay", and it is not rounded up.
+
 ### Simulated outcomes are never pooled with real ones
 
 Every ledger row carries `transport` — `real` or `sim` — and the two are never combined in a

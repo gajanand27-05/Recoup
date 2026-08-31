@@ -1,0 +1,12 @@
+{
+  "entity": "event",
+  "event": "subscription.halted",
+  "payload": {
+    "subscription": {
+      "entity": {
+        "customer_id": "cust_test_001",
+        "id": "sub_test_001"
+      }
+    }
+  }
+}
