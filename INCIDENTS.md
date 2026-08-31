@@ -437,3 +437,88 @@ reported as **unwired**, not as **insensitive**.
 
 The dangerous failures are not the ones that break. They are the ones that succeed in the
 shape of good news.
+
+---
+
+## INC-006 — The test suite manufactured evidence about Razorpay
+
+**2026-08-31 19:38 IST** · severity: high (a false claim, committed and pushed) · status: fixed
+
+**What happened**
+
+Task 17 added `capture.py`, whose job is to record the payload shapes Razorpay actually sends
+— so that `_extract_ids()` is validated against observed payloads rather than against our
+reading of the documentation. It was wired into the ingest, which captures when
+`transport == "real"`.
+
+`tests/test_ingest_writes_ledger.py` contains
+`test_transport_real_is_recorded_when_explicitly_declared`, which builds an app with
+`transport="real"` and posts a hand-written `subscription.halted` fixture through it.
+
+So the test suite called `capture_payload()` against the **committed fixtures directory**,
+and this was committed and pushed in `cd6609a`:
+
+```json
+{ "event": "subscription.halted",
+  "payload": {"subscription": {"entity": {
+      "customer_id": "cust_test_001", "id": "sub_test_001"}}} }
+```
+
+`sub_test_001` is a test identifier. Razorpay never sent this.
+
+**Why this is the worst class of defect in this project**
+
+`manifest()` reads that directory, so it immediately began reporting
+`subscription.halted` as **CAPTURED**. The README table says CAPTURED means *this is the
+shape Razorpay actually sends*.
+
+The single honest limitation of D-033 branch (b) — that one payload shape is inferred and
+cannot be observed in test mode — would have been silently converted into a claim that it
+*had* been observed, on the strength of a payload the test suite wrote. That is manufactured
+evidence, produced by the mechanism built to prevent exactly that.
+
+It is the INC-005 class in its most damaging form: not a check that proves nothing, but a
+check that produces a **false positive result about the outside world**.
+
+**How it was found**
+
+The README-drift test went red immediately: the committed table said INFERRED, the manifest
+computed CAPTURED, and the comparison failed. That test was written in the same commit, for a
+different reason — to stop the README going stale — and caught this instead.
+
+It was still committed and pushed before the failure was read. CI would also have failed it.
+
+**Fix — the split, not a flag**
+
+A flag (`capture_shapes=False` by default) would have worked and would have been the smaller
+change. It was rejected: it leaves the two directories the same, so the next thing that
+enables capture for a good reason re-creates the defect.
+
+Instead the paths are now different things:
+
+| | |
+|---|---|
+| `runs/captured/` | where the ingest **writes**. Gitignored. Observed, not evidence |
+| `src/recoup/execute/fixtures/captured/` | committed **evidence**, the only dir `manifest()` reads |
+
+`promote_capture()` moves a payload from one to the other, and nothing calls it
+automatically. Promoting a payload asserts *this is what Razorpay actually sent*, and that
+assertion now requires a person to make it.
+
+**What was added**
+
+- `test_the_repository_holds_no_fabricated_captures` — scans committed captures for test
+  identifiers (`sub_test_`, `sub_sim_`, `evt_fl_`, …) and fails on any of them.
+- A test that capture writes to the inbox and does **not** move the manifest.
+- A test that the inbox and the evidence directory are not the same path — otherwise the
+  split would be decorative.
+
+**Lesson kept**
+
+I asked "what real code path produces this input shape?" of the *tests* all through this
+build, and never asked it of the *fixtures*. The answer here was "the test suite", and the
+artifact it produced was a claim about a third party.
+
+Anything that writes into the repository from a code path the tests exercise will eventually
+be written by the tests. If that artifact is evidence, the write must require a deliberate
+human act — not a default, and not a flag.

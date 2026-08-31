@@ -26,6 +26,12 @@ import json
 from pathlib import Path
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
+
+# Where the ingest WRITES. Gitignored, so nothing here is evidence yet.
+CAPTURE_INBOX = Path(__file__).resolve().parents[3] / "runs" / "captured"
+
+# Where committed evidence LIVES, and the only directory `manifest()` reads.
+# A payload becomes a captured shape by being promoted here deliberately.
 CAPTURED_DIR = FIXTURE_DIR / "captured"
 
 # The event shapes `_extract_ids()` must handle. Anything here without a captured
@@ -52,17 +58,29 @@ def _safe_name(event: str) -> str:
 
 
 def capture_payload(event: str, raw: bytes, *, overwrite: bool = False) -> Path | None:
-    """Record the first payload seen for `event`. Returns the path, or None if kept.
+    """Record the first payload seen for `event` INTO THE INBOX. Never into evidence.
 
-    First-write-wins by default. A later payload of the same type does not
-    overwrite the captured one, so the fixture stays the thing that was actually
-    observed rather than the most recent thing that happened to arrive.
+    First-write-wins. A later payload of the same type does not overwrite the
+    captured one, so the fixture stays the thing that was actually observed
+    rather than the most recent thing that happened to arrive.
+
+    Writes to `runs/captured/`, which is gitignored. Promotion into
+    `fixtures/captured/` — the directory `manifest()` reads — is a separate,
+    deliberate act, because that directory is *evidence about what Razorpay
+    sends*.
+
+    That separation exists because it already failed the other way round: the
+    ingest tests run with `transport="real"`, so this function fired against the
+    committed fixtures directory and a hand-built test payload
+    (`sub_test_001`) was committed as though it were a captured Razorpay shape.
+    The manifest then reported `subscription.halted` as CAPTURED when it had
+    never been observed. See INC-006.
     """
     if event not in NEEDED_SHAPES:
         return None
 
-    CAPTURED_DIR.mkdir(parents=True, exist_ok=True)
-    path = CAPTURED_DIR / _safe_name(event)
+    CAPTURE_INBOX.mkdir(parents=True, exist_ok=True)
+    path = CAPTURE_INBOX / _safe_name(event)
     if path.exists() and not overwrite:
         return None
 
@@ -80,7 +98,38 @@ def capture_payload(event: str, raw: bytes, *, overwrite: bool = False) -> Path 
 
 
 def is_captured(event: str) -> bool:
+    """True only for a payload PROMOTED into the committed evidence directory."""
     return (CAPTURED_DIR / _safe_name(event)).exists()
+
+
+def pending_captures() -> list[str]:
+    """Events sitting in the inbox, observed but not yet promoted to evidence."""
+    if not CAPTURE_INBOX.exists():
+        return []
+    return sorted(
+        event
+        for event in NEEDED_SHAPES
+        if (CAPTURE_INBOX / _safe_name(event)).exists() and not is_captured(event)
+    )
+
+
+def promote_capture(event: str) -> Path:
+    """Move an observed payload from the inbox into committed evidence.
+
+    Deliberately a separate call with no automatic trigger. Promoting a payload
+    asserts *this is what Razorpay actually sent*, and that assertion should
+    require someone to make it.
+    """
+    source = CAPTURE_INBOX / _safe_name(event)
+    if not source.exists():
+        raise FileNotFoundError(
+            f"no observed payload for {event!r} in {CAPTURE_INBOX}. Run the ingest "
+            "against test mode with a tunnel first."
+        )
+    CAPTURED_DIR.mkdir(parents=True, exist_ok=True)
+    target = CAPTURED_DIR / _safe_name(event)
+    target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8", newline="")
+    return target
 
 
 def manifest() -> dict[str, str]:
