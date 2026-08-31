@@ -32,6 +32,35 @@ a legal classification — binding law, industry practice, or best-practice-by-a
 asserting a convention as a regulation is the fastest way to lose credibility with payments
 engineers.
 
+### On the `eval()` in the policy engine
+
+Rules live in [`rules.yaml`](src/recoup/policy/rules.yaml) as predicates, and the engine
+evaluates them. That is a deliberate choice, and the reasoning is here rather than buried
+because `eval` is a word people react to before they read.
+
+**Injection is not the threat model.** `rules.yaml` is repo-controlled and version-tracked;
+anyone able to edit it can edit `engine.py` just as easily. There is no untrusted input path
+into it — webhook bodies, LLM output and customer replies are all *data the rules run against*,
+never rules themselves.
+
+**What the engine does instead of trusting:**
+
+- **An explicit namespace**, no builtins. `CONTEXT_SCHEMA` declares exactly which names a
+  predicate may reference and, for each, exactly which attributes.
+- **Validation at load, not first use.** Every predicate is checked against that contract when
+  the engine is constructed. A typo in a rarely-hit rule fails at startup rather than halfway
+  through a 2,000-subscription batch — or never.
+- **A narrow grammar.** Comprehensions, chained attributes, and calls to anything but the
+  declared helpers are refused.
+
+**The alternative is worse, and we shipped it first.** The original engine hard-coded every
+rule in Python beside a YAML file carrying predicate strings that nothing evaluated — so
+`rules.yaml` looked like the enforcement surface while being decorative, and a rule could have
+been edited or plainly wrong with no effect on behaviour. That defect is written up as **A-019**.
+It also concealed a live one: `RBI-005` read `not msg.is_coercive` while nothing defined
+`is_coercive`, so half that rule could never be false. Load-time name checking turns that class
+of mistake into a startup error.
+
 **3. Every number is recomputable from this repository.**
 The ledger is append-only and hash-chained. `recoup verify-ledger` recomputes the chain and
 prints the head hash.

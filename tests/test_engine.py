@@ -1,4 +1,5 @@
 import pathlib
+import re
 from datetime import UTC, datetime
 
 import pytest
@@ -6,7 +7,14 @@ import yaml
 
 from recoup.ledger.replay import SubscriptionState
 from recoup.models import Action
-from recoup.policy.engine import PolicyEngine
+from recoup.policy.engine import (
+    CONTEXT_CALLABLES,
+    CONTEXT_SCHEMA,
+    CONTEXT_VALUES,
+    PolicyEngine,
+    PolicyRuleError,
+    validate_predicate,
+)
 
 _REPO = pathlib.Path(__file__).resolve().parents[1]
 RULES = str(_REPO / "src" / "recoup" / "policy" / "rules.yaml")
@@ -216,6 +224,96 @@ def test_editing_a_predicate_in_the_file_changes_the_verdict(tmp_path):
 
     assert "STOP-001" not in PolicyEngine(RULES).evaluate(_action(), state, now=NOW).rule_ids
     assert "STOP-001" in PolicyEngine(str(edited)).evaluate(_action(), state, now=NOW).rule_ids
+
+
+# --- the context contract, validated at LOAD time -----------------------------------
+
+
+def test_the_schema_and_the_runtime_context_agree_in_both_directions(engine):
+    """A schema that has drifted from the context is a declared thing with no consumer.
+
+    A field in the context but not the schema is unreachable by any rule. A field
+    in the schema but not the context passes load-time validation and then fails
+    at evaluation — which is exactly the arrival-time problem load validation
+    exists to remove.
+    """
+    ctx = engine._context(_action(), _state(), now=NOW)
+
+    assert set(CONTEXT_SCHEMA) | CONTEXT_VALUES | CONTEXT_CALLABLES == set(ctx)
+
+    for root, allowed in CONTEXT_SCHEMA.items():
+        actual = set(vars(ctx[root]))
+        assert actual == set(allowed), (
+            f"{root}: schema {sorted(allowed)} vs context {sorted(actual)}"
+        )
+
+
+def test_every_shipped_predicate_passes_validation():
+    doc = yaml.safe_load(open(RULES, encoding="utf-8"))
+    for rule in doc["rules"]:
+        validate_predicate(rule["id"], rule["predicate"])
+
+
+@pytest.mark.parametrize(
+    "predicate,fragment",
+    [
+        ("state.no_such_field < 5", "state.no_such_field"),
+        ("msg.is_coersive", "msg.is_coersive"),          # the RBI-005 typo, one letter out
+        ("nonexistent.attempts < 5", "'nonexistent'"),
+        ("banana", "'banana'"),
+        ("__import__", "'__import__'"),
+        ("__import__('os')", "other than"),
+        ("ist_hour(msg.send_at) < 5", "other than"),      # a helper not in the contract
+        ("state.ptp_date.year > 2020", "chained attribute"),
+        ("[x for x in (1, 2)]", "not one of the permitted"),
+        ("state.attempts <", "does not parse"),
+    ],
+    ids=[
+        "unknown-field", "typo'd-field", "unknown-root", "bare-name", "dunder-name",
+        "dunder-call", "uncontracted-call", "chained-attribute", "comprehension",
+        "syntax-error",
+    ],
+)
+def test_a_predicate_outside_the_contract_is_refused_at_load(predicate, fragment):
+    with pytest.raises(PolicyRuleError, match=re.escape(fragment)):
+        validate_predicate("TEST-001", predicate)
+
+
+def test_the_rbi_005_class_is_now_a_load_time_error(tmp_path):
+    """The exact defect A-019 recorded, made impossible rather than unlikely.
+
+    RBI-005 read `not msg.is_coercive` while nothing defined `is_coercive`. That
+    clause could never be false, and no test noticed because the rule still
+    denied on its other clause. With load-time name checking, the same mistake
+    stops the engine from being constructed at all.
+    """
+    doc = yaml.safe_load(open(RULES, encoding="utf-8"))
+    for rule in doc["rules"]:
+        if rule["id"] == "RBI-005":
+            rule["predicate"] = rule["predicate"].replace("is_coercive", "is_coersive")
+    broken = tmp_path / "rules.yaml"
+    broken.write_text(yaml.safe_dump(doc), encoding="utf-8")
+
+    with pytest.raises(PolicyRuleError, match="RBI-005"):
+        PolicyEngine(str(broken))
+
+
+def test_load_validation_covers_rules_that_no_action_would_reach(tmp_path):
+    """The point of validating at load rather than on first use.
+
+    SELF-001 only fires when a message has already been sent today. An action
+    that never triggers it would, under lazy validation, sail past a broken
+    predicate — for the whole batch.
+    """
+    doc = yaml.safe_load(open(RULES, encoding="utf-8"))
+    for rule in doc["rules"]:
+        if rule["id"] == "SELF-001":
+            rule["predicate"] = "state.messages_yesterday < 1"
+    broken = tmp_path / "rules.yaml"
+    broken.write_text(yaml.safe_dump(doc), encoding="utf-8")
+
+    with pytest.raises(PolicyRuleError, match="SELF-001"):
+        PolicyEngine(str(broken))
 
 
 def test_a_predicate_that_cannot_be_evaluated_fails_loudly(tmp_path):

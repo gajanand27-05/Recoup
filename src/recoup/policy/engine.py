@@ -24,8 +24,32 @@ Evaluation is deliberately strict
 A predicate that cannot be evaluated raises. Swallowing the error would turn a
 broken compliance rule into a green light, which is the worst available direction
 for this particular failure.
+
+Every predicate is validated at LOAD time, not on first use
+------------------------------------------------------------
+`CONTEXT_SCHEMA` below is a declared contract: exactly which names a predicate may
+reference and, for each, exactly which attributes. Anything outside it is a
+`PolicyRuleError` raised when the engine is constructed.
+
+This is not about injection. `rules.yaml` is repo-controlled, and anyone who can
+edit it can edit this file just as easily. It is about *arrival time*. Validating
+on first use means a typo in a rarely-hit rule surfaces halfway through a
+2,000-subscription batch, or never — and a clause that never resolves is a clause
+that can never be false.
+
+That is exactly what `RBI-005` was before this: it read `not msg.is_coercive`
+while nothing defined `is_coercive`, so half the rule was decorative and no test
+could have noticed, because the rule still denied on its other clause. Load-time
+name checking makes that class of defect impossible rather than merely unlikely.
+
+`eval` is used, deliberately
+-----------------------------
+With an explicit namespace and no builtins. The alternative — hard-coding each
+rule in Python beside a YAML file that carries decorative predicate strings — is
+precisely the defect A-019 documents. See the policy section of README.md.
 """
 
+import ast
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from types import SimpleNamespace
@@ -44,6 +68,94 @@ from recoup.policy.predicates import (
 VALID_CLASSES = frozenset(
     {"HARD_LAW", "INDUSTRY_PRACTICE", "BEST_PRACTICE_BY_ANALOGY", "SELF_IMPOSED"}
 )
+
+# The contract. A predicate may reference these names and, for the namespaced
+# ones, only these attributes. `_context()` must supply exactly this and nothing
+# else -- checked in both directions by test, because a schema that has drifted
+# from the runtime context is itself a declared thing with no consumer.
+CONTEXT_SCHEMA: dict[str, frozenset[str]] = {
+    "msg": frozenset({
+        "body", "channel", "category", "send_hour_ist", "dlt_template_id",
+        "dlt_template_approved", "body_matches_registered_template",
+        "wa_template_category", "is_coercive",
+    }),
+    "action": frozenset({"uses_rzp_reminder", "send_hour_ist", "action_type", "attempt_no"}),
+    "customer": frozenset({"whatsapp_optin"}),
+    "link": frozenset({"reminder_count"}),
+    "state": frozenset({"attempts", "spend_paise", "opted_out", "ptp_date", "messages_today"}),
+}
+
+# Bare values and callables a predicate may name.
+CONTEXT_VALUES = frozenset({"today"})
+CONTEXT_CALLABLES = frozenset({"contains_promotional_tokens"})
+
+ALLOWED_NAMES = frozenset(CONTEXT_SCHEMA) | CONTEXT_VALUES | CONTEXT_CALLABLES
+
+# Expression forms a predicate may use. Not a security boundary -- a deliberately
+# narrow grammar, so that "what can a rule say?" has a short, readable answer.
+_ALLOWED_NODES: tuple[type[ast.AST], ...] = (
+    ast.Expression, ast.BoolOp, ast.And, ast.Or, ast.UnaryOp, ast.Not,
+    ast.Compare, ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE,
+    ast.In, ast.NotIn, ast.Is, ast.IsNot,
+    ast.Name, ast.Load, ast.Attribute, ast.Constant, ast.Tuple, ast.List, ast.Call,
+)
+
+
+class PolicyRuleError(ValueError):
+    """A rule is malformed. Raised at load, never at evaluation."""
+
+
+def validate_predicate(rule_id: str, predicate: str) -> None:
+    """Check a predicate against the declared contract, statically.
+
+    Called for every rule when the engine is constructed. A predicate naming
+    something the context does not provide fails here, at startup, rather than on
+    whichever action first happens to reach that rule.
+    """
+    try:
+        tree = ast.parse(predicate, mode="eval")
+    except SyntaxError as exc:
+        raise PolicyRuleError(f"rule {rule_id}: predicate does not parse: {exc}") from exc
+
+    for node in ast.walk(tree):
+        if not isinstance(node, _ALLOWED_NODES):
+            raise PolicyRuleError(
+                f"rule {rule_id}: predicate uses {type(node).__name__}, which is not "
+                f"one of the permitted expression forms"
+            )
+
+        if isinstance(node, ast.Call):
+            if not isinstance(node.func, ast.Name) or node.func.id not in CONTEXT_CALLABLES:
+                raise PolicyRuleError(
+                    f"rule {rule_id}: predicate calls something other than "
+                    f"{sorted(CONTEXT_CALLABLES)}"
+                )
+
+        if isinstance(node, ast.Attribute):
+            root = node.value
+            if not isinstance(root, ast.Name):
+                raise PolicyRuleError(
+                    f"rule {rule_id}: predicate uses a chained attribute, which the "
+                    f"context contract does not cover"
+                )
+            allowed = CONTEXT_SCHEMA.get(root.id)
+            if allowed is None:
+                raise PolicyRuleError(
+                    f"rule {rule_id}: predicate references {root.id!r}, which is not in "
+                    f"the context. Permitted: {sorted(ALLOWED_NAMES)}"
+                )
+            if node.attr not in allowed:
+                raise PolicyRuleError(
+                    f"rule {rule_id}: predicate references {root.id}.{node.attr}, which "
+                    f"the context does not provide. {root.id} offers: {sorted(allowed)}. "
+                    f"An undefined field would make this clause unable to be false."
+                )
+
+        if isinstance(node, ast.Name) and node.id not in ALLOWED_NAMES:
+            raise PolicyRuleError(
+                f"rule {rule_id}: predicate references {node.id!r}, which is not in the "
+                f"context. Permitted: {sorted(ALLOWED_NAMES)}"
+            )
 
 
 @dataclass(frozen=True)
@@ -158,12 +270,13 @@ class PolicyEngine:
                 )
             self.rules[rule["id"]] = rule
 
-        # Compile once. A syntactically broken predicate is a load-time failure,
-        # not a surprise on the first action that happens to reach it.
-        self._compiled = {
-            rid: compile(r["predicate"], f"<rule {rid}>", "eval")
-            for rid, r in self.rules.items()
-        }
+        # Validate and compile EVERY predicate now. A typo in a rarely-hit rule
+        # must surface at startup, not halfway through a 2,000-subscription batch
+        # -- and a clause that never resolves is a clause that can never be false.
+        self._compiled = {}
+        for rid, rule in self.rules.items():
+            validate_predicate(rid, rule["predicate"])
+            self._compiled[rid] = compile(rule["predicate"], f"<rule {rid}>", "eval")
 
     def evaluated_rule_ids(self) -> set[str]:
         """Every rule this engine actually evaluates.
@@ -179,8 +292,10 @@ class PolicyEngine:
     def _context(self, action: Action, state, now: datetime) -> dict:
         """The names a predicate may reference.
 
-        Mirrors `ALLOWED_ROOTS` in `tests/test_policy_rules.py`, which fails if a
-        predicate names anything not provided here.
+        Must match `CONTEXT_SCHEMA` exactly, in both directions: a field here and
+        not in the schema is unreachable by any rule, and a field in the schema
+        and not here would pass load-time validation and then fail at evaluation.
+        Both directions are checked by test.
         """
         sending = action.action_type in ("send_message", "create_link", "escalate")
         hour = ist_hour(action.send_at)
