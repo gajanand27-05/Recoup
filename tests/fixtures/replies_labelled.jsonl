@@ -1,0 +1,60 @@
+{"text": "will pay after salary on the 3rd", "intent": "promise_to_pay", "promised_date": "2026-09-03"}
+{"text": "paisa aa jayega 5 tarikh ko, tab kar dunga", "intent": "promise_to_pay", "promised_date": "2026-09-05"}
+{"text": "I'll do it tomorrow", "intent": "promise_to_pay", "promised_date": "2026-09-02"}
+{"text": "kal kar dunga pakka", "intent": "promise_to_pay", "promised_date": "2026-09-02"}
+{"text": "give me till friday", "intent": "promise_to_pay", "promised_date": "2026-09-04"}
+{"text": "next month", "intent": "promise_to_pay", "promised_date": null}
+{"text": "agle mahine karunga", "intent": "promise_to_pay", "promised_date": null}
+{"text": "after salary", "intent": "promise_to_pay", "promised_date": null}
+{"text": "salary aane ke baad", "intent": "promise_to_pay", "promised_date": null}
+{"text": "sure, will settle this shortly", "intent": "promise_to_pay", "promised_date": null}
+{"text": "ok will pay", "intent": "promise_to_pay", "promised_date": null}
+{"text": "haan karta hu", "intent": "promise_to_pay", "promised_date": null}
+{"text": "payment kar dunga 10 ko", "intent": "promise_to_pay", "promised_date": "2026-09-10"}
+{"text": "by 15th september definitely", "intent": "promise_to_pay", "promised_date": "2026-09-15"}
+{"text": "this weekend", "intent": "promise_to_pay", "promised_date": null}
+{"text": "abhi nahi, 7 tarikh ko", "intent": "promise_to_pay", "promised_date": "2026-09-07"}
+{"text": "can I pay on the 20th instead", "intent": "promise_to_pay", "promised_date": "2026-09-20"}
+{"text": "thoda time do, kar dunga", "intent": "promise_to_pay", "promised_date": null}
+{"text": "day after tomorrow", "intent": "promise_to_pay", "promised_date": "2026-09-03"}
+{"text": "ha bhai kal", "intent": "promise_to_pay", "promised_date": "2026-09-02"}
+{"text": "STOP", "intent": "opt_out", "promised_date": null}
+{"text": "stop", "intent": "opt_out", "promised_date": null}
+{"text": "UNSUBSCRIBE", "intent": "opt_out", "promised_date": null}
+{"text": "don't message me again", "intent": "opt_out", "promised_date": null}
+{"text": "do not contact me", "intent": "opt_out", "promised_date": null}
+{"text": "bhai band karo ye messages", "intent": "opt_out", "promised_date": null}
+{"text": "message mat bhejo", "intent": "opt_out", "promised_date": null}
+{"text": "remove me from your list", "intent": "opt_out", "promised_date": null}
+{"text": "I already paid this last week", "intent": "already_paid", "promised_date": null}
+{"text": "maine to pay kar diya tha", "intent": "already_paid", "promised_date": null}
+{"text": "payment already done, check your records", "intent": "already_paid", "promised_date": null}
+{"text": "paid via upi yesterday", "intent": "already_paid", "promised_date": null}
+{"text": "kar diya tha na, phir kyu message aa raha", "intent": "already_paid", "promised_date": null}
+{"text": "money was debited from my account already", "intent": "already_paid", "promised_date": null}
+{"text": "already settled it on the app", "intent": "already_paid", "promised_date": null}
+{"text": "paise kat gaye the mere account se", "intent": "already_paid", "promised_date": null}
+{"text": "this is not my number", "intent": "wrong_number", "promised_date": null}
+{"text": "galat number hai ye", "intent": "wrong_number", "promised_date": null}
+{"text": "who is this? I don't have any subscription", "intent": "wrong_number", "promised_date": null}
+{"text": "wrong person bhai", "intent": "wrong_number", "promised_date": null}
+{"text": "I think you have the wrong number", "intent": "wrong_number", "promised_date": null}
+{"text": "kisi aur ka message mujhe aa raha hai", "intent": "wrong_number", "promised_date": null}
+{"text": "I cancelled this subscription in July, why am I being charged", "intent": "dispute", "promised_date": null}
+{"text": "ye charge galat hai, maine cancel kiya tha", "intent": "dispute", "promised_date": null}
+{"text": "I never signed up for this", "intent": "dispute", "promised_date": null}
+{"text": "maine kabhi subscribe nahi kiya", "intent": "dispute", "promised_date": null}
+{"text": "this is a fraudulent charge, I want a refund", "intent": "dispute", "promised_date": null}
+{"text": "cancel kar do, main nahi chahta", "intent": "dispute", "promised_date": null}
+{"text": "the service stopped working, why should I pay", "intent": "dispute", "promised_date": null}
+{"text": "raising this with my bank", "intent": "dispute", "promised_date": null}
+{"text": "ok", "intent": "unclear", "promised_date": null}
+{"text": "kya", "intent": "unclear", "promised_date": null}
+{"text": "hmm", "intent": "unclear", "promised_date": null}
+{"text": "?", "intent": "unclear", "promised_date": null}
+{"text": "theek hai", "intent": "unclear", "promised_date": null}
+{"text": "hello", "intent": "unclear", "promised_date": null}
+{"text": "ji", "intent": "unclear", "promised_date": null}
+{"text": "k", "intent": "unclear", "promised_date": null}
+{"text": "achha", "intent": "unclear", "promised_date": null}
+{"text": "dekhta hu", "intent": "unclear", "promised_date": null}
