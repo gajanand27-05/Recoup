@@ -1,7 +1,7 @@
 """Inbound reply understanding — and the model boundary around it.
 
-The accuracy tests are marked `llm` and deselected by the `-m "not llm"` that CI
-runs, so they need a key and CI never has one.
+The accuracy tests are marked `llm` and deselected by default (`addopts` in
+pyproject), so they need both a key and an opt-in `-m llm`, and CI never has one.
 
 The one thing that must not happen while a key is missing is a stand-in producing
 output that reads like a real evaluation. That is the INC-006 class: an artifact
@@ -24,11 +24,14 @@ from pydantic import ValidationError
 from recoup.agent.llm import (
     DEFAULT_ANTHROPIC_MODEL,
     DEFAULT_GEMINI_MODEL,
+    RATE_LIMIT_MAX_ATTEMPTS,
     STUB,
     AnthropicLLM,
     GeminiLLM,
     ModelProvenanceError,
     StubLLM,
+    _retry_after_seconds,
+    call_through_rate_limit,
     require_real_model,
 )
 from recoup.agent.replies import (
@@ -338,7 +341,81 @@ def test_deterministic_opt_outs_also_fail_the_gate():
         require_real_model(mixed, run_id="run-19")
 
 
-# --- LLM eval (needs ANTHROPIC_API_KEY; NOT run in CI) ----------------------------------
+# --- rate limiting ----------------------------------------------------------------------
+#
+# The free tier allows 5 requests/minute, found the hard way: the first live eval
+# got 5 fixtures in and then every remaining call 429'd. These tests run with no
+# SDK and no key because `call_through_rate_limit` was lifted out of the client
+# for exactly that reason — see its docstring.
+
+
+class _FakeClientError(Exception):
+    """Shaped like google.genai's ClientError: a `.code` and a repr'd body."""
+
+    def __init__(self, code: int, msg: str) -> None:
+        super().__init__(msg)
+        self.code = code
+
+
+_REAL_429 = (
+    "429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'details': [{'@type': "
+    "'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '46s'}]}}"
+)
+
+
+@pytest.mark.parametrize(
+    ("exc", "expected"),
+    [
+        (_FakeClientError(429, _REAL_429), 46.0),
+        (_FakeClientError(429, "429 RESOURCE_EXHAUSTED. quota gone, no RetryInfo"), 30.0),
+        (_FakeClientError(401, "401 UNAUTHENTICATED. invalid api key"), None),
+        (_FakeClientError(500, "500 INTERNAL. something broke"), None),
+    ],
+    ids=["429-honours-retrydelay", "429-falls-back", "401-never-retried", "500-never-retried"],
+)
+def test_only_rate_limits_are_retried(exc, expected):
+    """A 401 retried six times is five minutes of waiting for a wrong key."""
+    assert _retry_after_seconds(exc) == expected
+
+
+def test_a_rate_limited_call_is_retried_and_then_succeeds():
+    slept: list[float] = []
+    attempts = {"n": 0}
+
+    def send():
+        attempts["n"] += 1
+        if attempts["n"] < 3:
+            raise _FakeClientError(429, _REAL_429)
+        return "classified"
+
+    assert call_through_rate_limit(send, sleep=slept.append) == "classified"
+    assert attempts["n"] == 3
+    assert slept == [47.0, 47.0]  # the server's 46s floor, plus a second
+
+
+def test_a_non_rate_limit_error_is_raised_on_the_first_attempt():
+    attempts = {"n": 0}
+
+    def send():
+        attempts["n"] += 1
+        raise _FakeClientError(401, "401 UNAUTHENTICATED. invalid api key")
+
+    with pytest.raises(_FakeClientError):
+        call_through_rate_limit(send, sleep=lambda _: None)
+    assert attempts["n"] == 1, "a bad key must fail now, not after six waits"
+
+
+def test_retrying_gives_up_rather_than_waiting_forever():
+    def send():
+        raise _FakeClientError(429, _REAL_429)
+
+    slept: list[float] = []
+    with pytest.raises(_FakeClientError):
+        call_through_rate_limit(send, sleep=slept.append)
+    assert len(slept) == RATE_LIMIT_MAX_ATTEMPTS - 1
+
+
+# --- LLM eval (needs the key for RECOUP_LLM_MODEL; NOT run in CI) -----------------------
 
 
 @pytest.mark.llm

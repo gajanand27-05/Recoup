@@ -31,6 +31,8 @@ opt-out path, the shape of a result — and for nothing else.
 
 import json
 import os
+import re
+import time
 from typing import Protocol
 
 STUB = "stub"
@@ -112,12 +114,76 @@ def _require_key(env_var: str, supplied: str | None, placeholders: tuple[str, ..
     return key
 
 
+def _require_sdk(module: str, extra: str):
+    """Import a model SDK, or say which extra installs it.
+
+    The SDKs are optional extras imported lazily, so the suite runs with neither.
+    The cost is that the first real call fails with a bare ModuleNotFoundError,
+    which reads like broken code rather than a missing install — and the first
+    real call is the one most likely to happen in front of someone.
+    """
+    from importlib import import_module
+
+    try:
+        return import_module(module)
+    except ModuleNotFoundError as exc:  # pragma: no cover - exercised by the planted test
+        raise ModuleNotFoundError(
+            f"{module} is not installed. It is an optional extra so the suite can "
+            f'run without any model SDK: install it with `pip install -e ".[{extra}]"`. '
+            f"The client is otherwise configured correctly — this is a missing "
+            f"dependency, not a missing key."
+        ) from exc
+
+
+RATE_LIMIT_MAX_ATTEMPTS = 6  # ASSUMPTION: covers a ~5min stall at the observed 5 rpm free tier
+RATE_LIMIT_FALLBACK_SECONDS = 30.0  # ASSUMPTION: used only when the 429 carries no retryDelay
+
+
+def _retry_after_seconds(exc: Exception) -> float | None:
+    """Seconds the server asked us to wait, or None if this is not a rate limit.
+
+    Read out of the 429 body rather than guessed: Google returns a RetryInfo with
+    the exact delay, and sleeping less than it just burns another request against
+    the same quota.
+    """
+    if getattr(exc, "code", None) != 429 and "RESOURCE_EXHAUSTED" not in str(exc):
+        return None
+    match = re.search(r"'retryDelay':\s*'(\d+(?:\.\d+)?)s'", str(exc))
+    return float(match.group(1)) if match else RATE_LIMIT_FALLBACK_SECONDS
+
+
+def call_through_rate_limit(send, *, sleep=time.sleep):
+    """Call `send()`, waiting out 429s and re-raising everything else at once.
+
+    Lifted out of the client so it can be tested with no SDK installed and no
+    key. A retry loop living inside `classify_reply` would only ever be exercised
+    on a machine that could reach the API, which is the one place the test would
+    not run — and an untested retry loop is how a 500 comes to be retried six
+    times before the error the caller needed arrives five minutes late.
+    """
+    for attempt in range(1, RATE_LIMIT_MAX_ATTEMPTS + 1):
+        try:
+            return send()
+        except Exception as exc:
+            wait = _retry_after_seconds(exc)
+            if wait is None or attempt == RATE_LIMIT_MAX_ATTEMPTS:
+                raise
+            sleep(wait + 1.0)  # +1s: the server's delay is a floor, not a target
+    raise AssertionError("unreachable: the loop either returns or raises")
+
+
 class GeminiLLM:
     """Google Gemini via the AI Studio API.
 
     Structured output via a response schema — the model returns validated JSON or
     it is an error. Prose is never parsed, so a malformed answer is a validation
     failure rather than a plausible-looking string.
+
+    Retries on 429 only. That is safe here and is NOT a licence to retry
+    elsewhere: classification is a read with no side effect, so a duplicate call
+    costs quota and nothing else. The opposite rule still governs anything that
+    creates — a Payment Link create is never blind-retried (A-009), because there
+    the duplicate is a second link, not a second opinion.
     """
 
     def __init__(self, api_key: str | None = None, model: str = DEFAULT_GEMINI_MODEL) -> None:
@@ -129,21 +195,23 @@ class GeminiLLM:
         return self.model
 
     def classify_reply(self, text: str, today: str) -> dict:  # pragma: no cover - needs a key
-        from google import genai
-        from google.genai import types
+        genai = _require_sdk("google.genai", "gemini")
+        types = _require_sdk("google.genai.types", "gemini")
 
         from recoup.agent.prompts import REPLY_JSON_SCHEMA, REPLY_SYSTEM_PROMPT
 
         client = genai.Client(api_key=self._key)
-        response = client.models.generate_content(
-            model=self.model,
-            contents=text,
-            config=types.GenerateContentConfig(
-                system_instruction=REPLY_SYSTEM_PROMPT.format(today=today),
-                response_mime_type="application/json",
-                response_schema=REPLY_JSON_SCHEMA,
-                temperature=0.0,
-            ),
+        config = types.GenerateContentConfig(
+            system_instruction=REPLY_SYSTEM_PROMPT.format(today=today),
+            response_mime_type="application/json",
+            response_schema=REPLY_JSON_SCHEMA,
+            temperature=0.0,
+        )
+
+        response = call_through_rate_limit(
+            lambda: client.models.generate_content(
+                model=self.model, contents=text, config=config
+            )
         )
         raw = getattr(response, "text", None)
         if not raw:
@@ -169,7 +237,7 @@ class AnthropicLLM:
         return self.model
 
     def classify_reply(self, text: str, today: str) -> dict:  # pragma: no cover - needs a key
-        import anthropic
+        anthropic = _require_sdk("anthropic", "anthropic")
 
         from recoup.agent.prompts import REPLY_SYSTEM_PROMPT, REPLY_TOOL
 

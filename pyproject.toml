@@ -36,7 +36,17 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-markers = ["llm: requires ANTHROPIC_API_KEY and makes live API calls"]
+# Needs the key matching RECOUP_LLM_MODEL (GEMINI_API_KEY by default) and that
+# model's SDK extra installed.
+markers = ["llm: makes live API calls"]
+# Deselected by DEFAULT, not only by CI's explicit -m. Without this, `pytest -v`
+# -- the command CLAUDE.md tells me to run -- goes red on any machine with no key
+# or no SDK, while CI stays green because it passes -m "not llm" by hand. A suite
+# that is green only under the flags CI happens to use is not a green suite.
+# Opt in with `pytest -m llm`: a later -m overrides this one, and the eval then
+# RAISES on a missing key rather than skipping, because at that point you asked
+# for it and a silently-skipped eval is how "not run" comes to look like "passed".
+addopts = ["-m", "not llm"]
 
 [tool.ruff]
 line-length = 100
