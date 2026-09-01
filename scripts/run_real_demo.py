@@ -4,19 +4,30 @@
 
 What this does and does not claim
 ----------------------------------
-It issues a **real** Payment Link against a **real** test-mode subscription, with
-real auth, the real deterministic `reference_id`, and real error envelopes. Run it
-twice and the second call demonstrates the collision path: Razorpay rejects the
-repeated `reference_id`, and this fetches rather than creating a second link.
+It issues a **real** Payment Link, with real auth, the real deterministic
+`reference_id`, and real error envelopes. Run it twice and the second call
+demonstrates the collision path: Razorpay rejects the repeated `reference_id`,
+and this fetches rather than creating a second link.
 
-It does **not** produce a real `subscription.halted`. Test mode will not simulate
-a failed subscription charge, so the trigger is replayed from a fixture. The claim
-is therefore:
+Two things it does **not** do, both stated rather than glossed:
 
-    "the outreach path ran against Razorpay; the failure sequence that triggers
-     it was replayed"
+1. **It does not produce a real `subscription.halted`.** Test mode will not
+   simulate a *failed* subscription charge, so the trigger is replayed.
+2. **The subscription context is synthetic** (A-020). A read-only probe on
+   2026-09-01 found `plans` and `subscriptions` returning 401 while seven other
+   endpoints returned 200 on the same credentials — the Subscriptions product is
+   not enabled on this account. A Payment Link is standalone and needs no
+   Subscription, so the link is genuinely real; the subscription it represents is
+   not.
 
-and not "the loop ran end-to-end against Razorpay". See D-033 and README.
+The claim is therefore:
+
+    "Payment Links were really issued against Razorpay -- real auth, real
+     reference_id collision behaviour, real error envelopes. The subscription
+     they represent, and the failure sequence that triggers outreach, were both
+     replayed."
+
+and not "the loop ran end-to-end against Razorpay". See A-020, D-033 and README.
 
 Rows produced here are `transport="real"`. The replayed halt is `transport="sim"`.
 The run is therefore MIXED, and `require_declared_split()` will refuse to pool it

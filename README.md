@@ -160,10 +160,24 @@ This table is **generated from the filesystem**, not maintained by hand, and is 
 against a fresh render by `tests/test_capture.py`. It cannot go stale: the moment a payload is
 captured, that test fails until the table is regenerated.
 
-**The claim the demo supports, stated exactly:** *the outreach path ran against Razorpay —
-real payment links, really issued, with real auth and real `reference_id` collision behaviour.
-The failure sequence that triggers it was replayed.* That is weaker than "the loop ran
-end-to-end against Razorpay", and it is not rounded up.
+### The subscription context is synthetic
+
+A read-only API probe on 2026-09-01 found `plans` and `subscriptions` returning **401** while
+`payment_links`, `orders`, `customers`, `payments`, `items`, `invoices` and `settlements` all
+returned **200** — on the same client, with the same credentials. That is endpoint-level
+authorisation, not a credential fault: the Subscriptions product is not enabled on the
+account.
+
+A Payment Link is a standalone object and needs no Subscription, so the links the demo issues
+are genuinely real. The subscription they represent is not.
+
+**The claim the demo supports, stated exactly:** *Payment Links were really issued against
+Razorpay — real auth, real `reference_id` collision behaviour, real error envelopes. The
+subscription they represent, and the failure sequence that triggers outreach, were both
+replayed.*
+
+That is weaker than "the loop ran end-to-end against Razorpay", and it is not rounded up.
+See `DECISION.md` A-020.
 
 ### Simulated outcomes are never pooled with real ones
 
