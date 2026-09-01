@@ -97,6 +97,19 @@ def test_no_claim_file_asserts_more_than_a_020_permits(path):
             start = at + 1
 
 
+# `DECISION.md` and `VIDEO.md` are LOCAL-ONLY (CLAUDE.md §2) and are not in the
+# published repository. The checks below therefore skip on CI rather than fail —
+# a shipped test suite must not depend on files that deliberately stay local.
+#
+# They are still worth having: the drift they guard against happens on the
+# machine where those files are edited, which is exactly where they do run.
+_LOCAL_ONLY = pytest.mark.skipif(
+    not (REPO / "DECISION.md").exists(),
+    reason="DECISION.md is local-only (CLAUDE.md §2); not present in the published repo",
+)
+
+
+@_LOCAL_ONLY
 def test_the_decision_register_keeps_its_superseded_text_with_the_correction():
     """DECISION.md is the one file that KEEPS the old wording, on purpose.
 
@@ -117,11 +130,30 @@ def test_the_decision_register_keeps_its_superseded_text_with_the_correction():
     assert "synthetic" in text[correction : correction + 900]
 
 
+@_LOCAL_ONLY
 def test_gate_one_is_described_as_blocked_not_merely_unanswered():
     """Unanswered invites "just go and look". Blocked tells you what to do."""
     assert "blocked behind an earlier step" in (REPO / "DECISION.md").read_text(
         encoding="utf-8"
     )
+
+
+def test_the_shipped_files_carry_the_claim_without_needing_the_local_ones():
+    """The published repository must stand alone.
+
+    A reader who clones this has README, `real.py` and `run_real_demo.py` and
+    nothing else. If the narrowed claim only survived in DECISION.md or VIDEO.md,
+    the published repo would carry the generous version unqualified.
+    """
+    shipped = [
+        REPO / "README.md",
+        REPO / "scripts" / "run_real_demo.py",
+        REPO / "src" / "recoup" / "execute" / "real.py",
+    ]
+    for path in shipped:
+        body = normalise(path.read_text(encoding="utf-8"))
+        for clause in REQUIRED_CLAUSES:
+            assert clause in body, f"{path.name} (shipped) is missing {clause!r}"
 
 
 # --- the probe that established the finding -------------------------------------
