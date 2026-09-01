@@ -27,6 +27,7 @@ from recoup.agent.llm import (
     RATE_LIMIT_MAX_ATTEMPTS,
     STUB,
     AnthropicLLM,
+    DailyQuotaExhausted,
     GeminiLLM,
     ModelProvenanceError,
     StubLLM,
@@ -359,7 +360,24 @@ class _FakeClientError(Exception):
 
 _REAL_429 = (
     "429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'details': [{'@type': "
-    "'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '46s'}]}}"
+    "'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaId': "
+    "'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaValue': '5'}]}, "
+    "{'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '46s'}]}}"
+)
+
+# Copied verbatim from the failure it describes, NOT hand-written to match the
+# parser. The per-day RetryInfo still says ~59s, so anything reading only the
+# delay treats "come back tomorrow" as "wait a minute" -- which is exactly what
+# the first eval did, for 11m33s.
+_REAL_429_PER_DAY = (
+    "429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your "
+    "current quota', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': "
+    "'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': "
+    "'generativelanguage.googleapis.com/generate_content_free_tier_requests', "
+    "'quotaId': 'GenerateRequestsPerDayPerProjectPerModel-FreeTier', "
+    "'quotaDimensions': {'location': 'global', 'model': 'gemini-2.5-flash'}, "
+    "'quotaValue': '20'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', "
+    "'retryDelay': '59s'}]}}"
 )
 
 
@@ -403,6 +421,26 @@ def test_a_non_rate_limit_error_is_raised_on_the_first_attempt():
     with pytest.raises(_FakeClientError):
         call_through_rate_limit(send, sleep=lambda _: None)
     assert attempts["n"] == 1, "a bad key must fail now, not after six waits"
+
+
+def test_a_daily_quota_is_not_slept_on():
+    """The defect this test exists for cost 11m33s of sleeping before it raised."""
+    slept: list[float] = []
+    attempts = {"n": 0}
+
+    def send():
+        attempts["n"] += 1
+        raise _FakeClientError(429, _REAL_429_PER_DAY)
+
+    with pytest.raises(DailyQuotaExhausted, match="per-day"):
+        call_through_rate_limit(send, sleep=slept.append)
+    assert attempts["n"] == 1, "a daily quota must fail on the first attempt"
+    assert slept == [], "no sleeping on a quota that resets tomorrow"
+
+
+def test_a_per_minute_quota_is_still_slept_on():
+    """The fix must not turn every 429 into a hard failure."""
+    assert _retry_after_seconds(_FakeClientError(429, _REAL_429)) == 46.0
 
 
 def test_retrying_gives_up_rather_than_waiting_forever():

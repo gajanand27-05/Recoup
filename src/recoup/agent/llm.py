@@ -139,15 +139,45 @@ RATE_LIMIT_MAX_ATTEMPTS = 6  # ASSUMPTION: covers a ~5min stall at the observed 
 RATE_LIMIT_FALLBACK_SECONDS = 30.0  # ASSUMPTION: used only when the 429 carries no retryDelay
 
 
+class DailyQuotaExhausted(RuntimeError):
+    """The per-DAY quota is gone. Waiting will not help; say so immediately."""
+
+
+def _is_daily_quota(exc: Exception) -> bool:
+    """True when the exhausted quota resets tomorrow rather than next minute.
+
+    Google sends both limits as a plain 429 with a RetryInfo, and the RetryInfo
+    on a per-day exhaustion still says ~59s -- which is true only in the sense
+    that retrying then will also fail. The quotaId is the only thing that
+    distinguishes them.
+    """
+    return "PerDay" in str(exc)
+
+
 def _retry_after_seconds(exc: Exception) -> float | None:
     """Seconds the server asked us to wait, or None if this is not a rate limit.
 
     Read out of the 429 body rather than guessed: Google returns a RetryInfo with
     the exact delay, and sleeping less than it just burns another request against
     the same quota.
+
+    Raises rather than returning a wait when the exhausted quota is the DAILY
+    one. Found the hard way: the first full eval spent 11m33s sleeping 59s at a
+    time against `GenerateRequestsPerDayPerProjectPerModel-FreeTier`, which had
+    already given out all 20 of its requests for the day. A retry that cannot
+    tell "wait a minute" from "come back tomorrow" turns a clear failure into a
+    slow one.
     """
     if getattr(exc, "code", None) != 429 and "RESOURCE_EXHAUSTED" not in str(exc):
         return None
+    if _is_daily_quota(exc):
+        raise DailyQuotaExhausted(
+            "the per-day free-tier quota is exhausted (20 requests/day for "
+            "gemini-2.5-flash). Retrying cannot help: it resets on a daily "
+            "boundary, not in the ~59s the RetryInfo suggests. Enable billing, "
+            "or run the eval tomorrow and say in the report that it was not run "
+            "today rather than reporting a partial one."
+        ) from exc
     match = re.search(r"'retryDelay':\s*'(\d+(?:\.\d+)?)s'", str(exc))
     return float(match.group(1)) if match else RATE_LIMIT_FALLBACK_SECONDS
 
