@@ -19,6 +19,10 @@ class Settings:
     rzp_key_secret: str = field(default_factory=lambda: _env("RZP_KEY_SECRET"))
     rzp_webhook_secret: str = field(default_factory=lambda: _env("RZP_WEBHOOK_SECRET"))
     anthropic_api_key: str = field(default_factory=lambda: _env("ANTHROPIC_API_KEY"))
+    gemini_api_key: str = field(default_factory=lambda: _env("GEMINI_API_KEY"))
+    # The specific model id, not a vendor. Recorded on every classification,
+    # and `require_real_model()` refuses to pool figures across two of them.
+    llm_model: str = field(default_factory=lambda: _env("RECOUP_LLM_MODEL", "gemini-2.5-flash"))
     experiment_salt: str = field(default_factory=lambda: _env("EXPERIMENT_SALT", "recoup-2026-08"))
     db_path: str = field(default_factory=lambda: _env("RECOUP_DB", "runs/recoup.db"))
 

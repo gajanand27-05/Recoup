@@ -1,15 +1,18 @@
 """Inbound reply understanding — and the model boundary around it.
 
-`ANTHROPIC_API_KEY` is not set, so **no real model has run**. The accuracy tests
-are marked `llm` and are deselected by `-m "not llm"`, which is what CI runs.
-That is reported as **built, not exercised** — different from done and different
-from dropped.
+The accuracy tests are marked `llm` and deselected by the `-m "not llm"` that CI
+runs, so they need a key and CI never has one.
 
-The one thing that must not happen while the key is missing is a stand-in
-producing output that reads like a real evaluation. That is the INC-006 class:
-an artifact making a claim about something outside the repository with nothing
-behind it. So the model is a named boundary and `require_real_model()` refuses
-stub output, exactly as `require_declared_split()` refuses a mixed transport.
+The one thing that must not happen while a key is missing is a stand-in producing
+output that reads like a real evaluation. That is the INC-006 class: an artifact
+making a claim about something outside the repository with nothing behind it. So
+the model is a named boundary and `require_real_model()` refuses stub output,
+exactly as `require_declared_split()` refuses a mixed transport.
+
+**Any real model is permitted; two at once are not.** Which vendor is a free
+choice — the structured-output discipline holds for anything that can be asked
+for a schema rather than for prose. Mixing is not free: two models are two
+instruments, and one figure over both measures neither.
 """
 
 import json
@@ -19,9 +22,11 @@ import pytest
 from pydantic import ValidationError
 
 from recoup.agent.llm import (
-    ANTHROPIC,
+    DEFAULT_ANTHROPIC_MODEL,
+    DEFAULT_GEMINI_MODEL,
     STUB,
     AnthropicLLM,
+    GeminiLLM,
     ModelProvenanceError,
     StubLLM,
     require_real_model,
@@ -42,6 +47,25 @@ def load_fixtures():
         for line in FIXTURES.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
+
+
+def _configured_client():
+    """The model named by RECOUP_LLM_MODEL, using whichever key is set.
+
+    Used only by the `llm`-marked evals. Raises rather than falling back, so a
+    missing key is a failed eval and never a quietly stubbed one.
+    """
+    from recoup.config import Settings
+
+    model = Settings().llm_model
+    if model.startswith("gemini"):
+        return GeminiLLM(model=model)
+    if model.startswith("claude"):
+        return AnthropicLLM(model=model)
+    raise ValueError(
+        f"RECOUP_LLM_MODEL={model!r} names no known client. Add one rather than "
+        "letting the eval pick something."
+    )
 
 
 # --- deterministic layer: no LLM, must be exact ------------------------------------
@@ -177,21 +201,49 @@ def test_the_fixture_contains_hinglish_not_just_english():
 # --- the model boundary ----------------------------------------------------------------
 
 
-def test_a_real_client_refuses_to_exist_without_a_key(monkeypatch):
+@pytest.mark.parametrize(
+    "client,env",
+    [(GeminiLLM, "GEMINI_API_KEY"), (AnthropicLLM, "ANTHROPIC_API_KEY")],
+    ids=["gemini", "anthropic"],
+)
+def test_a_real_client_refuses_to_exist_without_a_key(client, env, monkeypatch):
     """No silent fallback. This is the whole point of the boundary.
 
     A stub that quietly stands in when the key is missing is how a run with no
     model behind it comes to look real.
     """
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
-        AnthropicLLM()
+    monkeypatch.delenv(env, raising=False)
+    with pytest.raises(ValueError, match=env):
+        client()
 
 
-def test_a_placeholder_key_is_refused_too(monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-xxxxxxxx")
+@pytest.mark.parametrize(
+    "client,env,placeholder",
+    [
+        (GeminiLLM, "GEMINI_API_KEY", "your-key-from-aistudio"),
+        (AnthropicLLM, "ANTHROPIC_API_KEY", "sk-ant-xxxxxxxx"),
+    ],
+    ids=["gemini", "anthropic"],
+)
+def test_a_placeholder_key_is_refused_too(client, env, placeholder, monkeypatch):
+    monkeypatch.setenv(env, placeholder)
     with pytest.raises(ValueError, match="placeholder"):
-        AnthropicLLM()
+        client()
+
+
+def test_a_client_names_the_specific_model_not_the_vendor(monkeypatch):
+    """`gemini` cannot tell flash from pro, and those are different instruments."""
+    monkeypatch.setenv("GEMINI_API_KEY", "real-looking-key")
+    assert GeminiLLM().name == DEFAULT_GEMINI_MODEL
+    assert GeminiLLM(model="gemini-2.5-pro").name == "gemini-2.5-pro"
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-real")
+    assert AnthropicLLM().name == DEFAULT_ANTHROPIC_MODEL
+
+
+def test_the_default_model_is_the_fast_tier():
+    # Reply classification is short-input, structured-output, high-volume.
+    assert DEFAULT_GEMINI_MODEL == "gemini-2.5-flash"
 
 
 def test_understand_reply_refuses_to_guess_without_a_client():
@@ -222,14 +274,53 @@ def test_an_empty_result_set_is_not_silently_reportable():
         require_real_model([], run_id="run-19")
 
 
-def test_real_model_output_would_pass_the_gate():
-    """The gate must be satisfiable, or it is a wall rather than a check."""
+@pytest.mark.parametrize("model", ["gemini-2.5-flash", "claude-sonnet-5", "gemini-2.5-pro"])
+def test_any_single_real_model_passes_the_gate(model):
+    """Vendor is a free choice. The gate permits any real model and returns which.
+
+    Nothing in this design depends on whose API is called — the
+    structured-output discipline holds for any model that can be asked for a
+    schema rather than for prose.
+    """
     passing = [
-        ReplyUnderstanding(
-            intent="unclear", confidence=0.5, evidence="x", model_source=ANTHROPIC
-        )
+        ReplyUnderstanding(intent="unclear", confidence=0.5, evidence="x", model_source=model)
     ]
-    assert require_real_model(passing, run_id="run-19") == [ANTHROPIC]
+    assert require_real_model(passing, run_id="run-19") == model
+
+
+def test_two_models_in_one_figure_are_refused():
+    """Two models are two instruments, not one instrument with a setting.
+
+    A single accuracy figure over Gemini results and Claude results measures
+    neither — the same category error as pooling `sim` and `real` transports.
+    """
+    mixed = [
+        ReplyUnderstanding(intent="unclear", confidence=0.5, evidence="",
+                           model_source="gemini-2.5-flash"),
+        ReplyUnderstanding(intent="unclear", confidence=0.5, evidence="",
+                           model_source="claude-sonnet-5"),
+    ]
+    with pytest.raises(ModelProvenanceError, match="two instruments"):
+        require_real_model(mixed, run_id="run-19")
+
+
+def test_two_tiers_of_the_same_vendor_are_also_refused():
+    """flash and pro are different models. A vendor-level label would hide that."""
+    mixed = [
+        ReplyUnderstanding(intent="unclear", confidence=0.5, evidence="",
+                           model_source="gemini-2.5-flash"),
+        ReplyUnderstanding(intent="unclear", confidence=0.5, evidence="",
+                           model_source="gemini-2.5-pro"),
+    ]
+    with pytest.raises(ModelProvenanceError, match="two instruments"):
+        require_real_model(mixed, run_id="run-19")
+
+
+def test_a_result_with_no_recorded_model_is_refused():
+    orphan = [ReplyUnderstanding(intent="unclear", confidence=0.5, evidence="",
+                                 model_source="")]
+    with pytest.raises(ModelProvenanceError, match="no recorded model_source"):
+        require_real_model(orphan, run_id="run-19")
 
 
 def test_deterministic_opt_outs_also_fail_the_gate():
@@ -239,7 +330,9 @@ def test_deterministic_opt_outs_also_fail_the_gate():
     """
     mixed = [
         understand_reply("STOP", client=None),
-        ReplyUnderstanding(intent="unclear", confidence=0.5, evidence="", model_source=ANTHROPIC),
+        ReplyUnderstanding(
+            intent="unclear", confidence=0.5, evidence="", model_source=DEFAULT_GEMINI_MODEL
+        ),
     ]
     with pytest.raises(ModelProvenanceError, match="deterministic"):
         require_real_model(mixed, run_id="run-19")
@@ -251,7 +344,7 @@ def test_deterministic_opt_outs_also_fail_the_gate():
 @pytest.mark.llm
 def test_intent_accuracy_meets_the_bar():  # pragma: no cover - needs a key
     fixtures = load_fixtures()
-    client = AnthropicLLM()
+    client = _configured_client()
     results = [understand_reply(f["text"], client=client, today="2026-09-01") for f in fixtures]
     require_real_model(results, run_id="task-19-eval")
 
@@ -264,7 +357,7 @@ def test_intent_accuracy_meets_the_bar():  # pragma: no cover - needs a key
 @pytest.mark.llm
 def test_promise_to_pay_date_extraction_meets_the_bar():  # pragma: no cover - needs a key
     dated = [f for f in load_fixtures() if f["promised_date"]]
-    client = AnthropicLLM()
+    client = _configured_client()
     results = [understand_reply(f["text"], client=client, today="2026-09-01") for f in dated]
     require_real_model(results, run_id="task-19-eval")
 

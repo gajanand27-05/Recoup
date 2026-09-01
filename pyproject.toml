@@ -12,12 +12,16 @@ dependencies = [
     "jinja2>=3.1",
     "numpy>=2.1",
     "scipy>=1.14",
-    "anthropic>=0.40",
     "python-dotenv>=1.0",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "ruff>=0.7"]
+# Model SDKs are optional and imported lazily inside the client that needs one,
+# so CI installs neither and the suite runs without either. Install the one
+# matching RECOUP_LLM_MODEL to actually call a model.
+gemini = ["google-genai>=1.0"]
+anthropic = ["anthropic>=0.40"]
 
 [project.scripts]
 recoup = "recoup.cli:main"

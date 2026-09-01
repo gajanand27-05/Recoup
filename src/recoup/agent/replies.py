@@ -19,7 +19,7 @@ from datetime import date
 
 from pydantic import BaseModel, Field, field_validator
 
-from recoup.agent.llm import ANTHROPIC, STUB, LLMTransport
+from recoup.agent.llm import DETERMINISTIC, LLMTransport
 
 INTENTS = (
     "promise_to_pay",
@@ -62,9 +62,13 @@ class ReplyUnderstanding(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     evidence: str = ""
 
-    # Which model produced this. `deterministic` for the pre-model opt-out path,
-    # which is the one verdict that needs no model at all.
-    model_source: str = "deterministic"
+    # Which model produced this — the SPECIFIC model id, not a vendor, because
+    # `require_real_model()` refuses to pool across models and needs to be able
+    # to tell `gemini-2.5-flash` from `gemini-2.5-pro`.
+    #
+    # `deterministic` for the pre-model opt-out path, which is the one verdict
+    # that needs no model at all.
+    model_source: str = DETERMINISTIC
 
     @field_validator("promised_date")
     @classmethod
@@ -103,18 +107,20 @@ def understand_reply(
             promised_date=None,
             confidence=1.0,
             evidence="matched a hard opt-out pattern upstream of any model",
-            model_source="deterministic",
+            model_source=DETERMINISTIC,
         )
 
     if client is None:
         raise ValueError(
             "no LLM transport supplied and this reply is not a deterministic "
-            "opt-out. Pass AnthropicLLM() for a real classification, or StubLLM() "
-            "to exercise the plumbing — but stub output may never be reported."
+            "opt-out. Pass GeminiLLM() or AnthropicLLM() for a real "
+            "classification, or StubLLM() to exercise the plumbing — but stub "
+            "output may never be reported."
         )
 
     raw = client.classify_reply(text, today=today or date.today().isoformat())
     understanding = ReplyUnderstanding(**raw)
-    return understanding.model_copy(
-        update={"model_source": ANTHROPIC if client.name == ANTHROPIC else STUB}
-    )
+    # The transport names the specific model, and that name is what gets
+    # recorded. Nothing here maps a vendor onto a generic label, because a
+    # figure that says "gemini" cannot tell flash from pro.
+    return understanding.model_copy(update={"model_source": client.name})
