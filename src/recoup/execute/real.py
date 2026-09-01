@@ -7,13 +7,22 @@ was never answered, so per the weaker-claim rule branch (b) ships. Branch (b) is
 **not branch (a) with steps removed.** It is a different construction with a
 different claim:
 
-    "The outreach path ran against Razorpay — real payment links, really issued,
-     with real auth, real reference_id collision behaviour and real error
-     envelopes. The failure sequence that triggers it was REPLAYED, because test
-     mode will not produce a failed subscription charge."
+    "Payment Links were really issued against Razorpay — real auth, real
+     reference_id collision behaviour, real error envelopes. The subscription
+     they represent, and the failure sequence that triggers outreach, were both
+     REPLAYED."
 
 That is weaker than "the loop ran end-to-end against Razorpay", and it is said in
-that form. See D-033 and the README limitations section.
+that form. See A-020, D-033 and the README limitations section.
+
+**A-020 narrowed this further on 2026-09-01.** An earlier wording said "real
+Payment Links against real subscriptions". A read-only probe found `plans` and
+`subscriptions` returning 401 while seven other endpoints returned 200 on the
+same credentials — the Subscriptions product is not enabled on the account. A
+Payment Link is standalone and needs no Subscription, so the links are genuinely
+real while the subscription context around them is synthetic. The narrowed
+wording is not rounded back up if the product is enabled later; that would be a
+new run with a new claim.
 
 Consequence: the demo run is transport-MIXED
 ---------------------------------------------

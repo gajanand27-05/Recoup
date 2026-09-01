@@ -187,6 +187,36 @@ mistakes are not symmetric: calling a fixture `real` manufactures evidence that 
 against a live processor, while calling a real event `sim` only forfeits a claim we were entitled
 to make.
 
+#### The two transports cannot know the same things
+
+That is a policy, and a reader is entitled to ask whether we would have kept it if the numbers
+had come out differently. So here is the same conclusion from a direction that does not depend
+on trusting us.
+
+**`SimTransport.execute()` returns whether the payment was recovered. `RealTransport.execute()`
+always returns `recovered=False`** — and not because nothing was recovered.
+
+The simulator can answer, because it *is* the customer: it draws from the frozen response curve
+and that draw is the outcome. The real transport cannot answer, because a created Payment Link
+says nothing whatever about whether anyone paid it. That arrives later, asynchronously, as a
+`payment_link.paid` webhook — possibly days later, possibly never.
+
+So the two arms' data sources differ in **what they are capable of knowing**, not merely in how
+they were implemented:
+
+| | Outcome available | When | From |
+|---|---|---|---|
+| `sim` | yes | at execution | the draw itself |
+| `real` | no | later, or never | an inbound webhook |
+
+Pooling them would average a synchronous oracle with an asynchronous observation, and the two
+are not the same measurement even when they agree. A real transport that returned an outcome
+synchronously would be *inventing* one — which is why the type returns `False` rather than
+`None` or a guess.
+
+This is an argument about the data, not about our intentions. It holds whether or not you
+believe the paragraph above it.
+
 ## Status
 
 Under construction for the 5 September 2026 deadline. Architecture and reproduction steps land

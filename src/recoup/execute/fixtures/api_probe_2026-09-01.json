@@ -1,0 +1,31 @@
+{
+  "provenance": {
+    "source": "read_only_api_probe",
+    "performed_at": "2026-09-01T03:30:00Z",
+    "key_id_prefix": "rzp_test_",
+    "mode": "test",
+    "method": "HTTP GET with ?count=1 on each endpoint, one httpx.Client, one credential pair",
+    "mutating": false,
+    "note": "Read-only. No object was created, modified or charged."
+  },
+  "finding": "Subscriptions is not enabled on this account. Endpoint-level authorisation, not a credential fault: seven endpoints returned 200 on the same client with the same credentials.",
+  "results": {
+    "payment_links": 200,
+    "orders": 200,
+    "customers": 200,
+    "payments": 200,
+    "items": 200,
+    "invoices": 200,
+    "settlements": 200,
+    "plans": 401,
+    "subscriptions": 401
+  },
+  "error_envelope_on_401": {
+    "error": "Unauthorized",
+    "note": "A bare string, not Razorpay's usual {\"error\": {\"code\": ..., \"description\": ...}} object. That is the product-not-enabled shape rather than the auth-failed shape."
+  },
+  "consequences": [
+    "Gate 1 is blocked behind an earlier step, not merely unanswered: there is no Subscription to charge, so whether 'Charge this now' offers a failure outcome cannot be asked.",
+    "D-033 branch (b) narrows: the Payment Links are real, the subscription context around them is synthetic. See A-020."
+  ]
+}
