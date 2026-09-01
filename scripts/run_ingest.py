@@ -28,6 +28,9 @@ app = create_app(
     webhook_secret=settings.rzp_webhook_secret,
     run_id=os.getenv("RECOUP_RUN_ID", "first-light"),
     transport="real",
+    # Public half of the credential pair, recorded into capture provenance so a
+    # fixture can say which key it arrived against.
+    key_id=settings.rzp_key_id,
 )
 
 if __name__ == "__main__":

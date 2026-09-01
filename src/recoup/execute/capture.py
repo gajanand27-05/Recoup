@@ -25,6 +25,8 @@ a mechanism with no caller, which is the INC-005 shape.
 import json
 from pathlib import Path
 
+from recoup.clock import utc_now_iso
+
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 
 # Where the ingest WRITES. Gitignored, so nothing here is evidence yet.
@@ -53,11 +55,65 @@ CAPTURABLE_IN_TEST_MODE: frozenset[str] = frozenset({
 })
 
 
+# A payload is only evidence if we know HOW it arrived. `source` values that
+# count as a live delivery from Razorpay; anything else is captured-but-unverified.
+LIVE_SOURCES: frozenset[str] = frozenset({"razorpay_webhook"})
+
+_REQUIRED_PROVENANCE = ("source", "received_at", "key_id")
+
+
 def _safe_name(event: str) -> str:
     return event.replace("/", "_").replace("..", "_") + ".json"
 
 
-def capture_payload(event: str, raw: bytes, *, overwrite: bool = False) -> Path | None:
+def provenance_problem(path: Path) -> str | None:
+    """Why this file is not evidence of a live Razorpay delivery, or None.
+
+    Provenance that is written and never read is the INC-005 class in a new hat.
+    This function is the consumer, and `manifest()` reports what it returns —
+    so the recorded fields have to be right, not merely present.
+    """
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (ValueError, UnicodeDecodeError) as exc:
+        return f"file does not parse: {exc}"
+
+    if not isinstance(doc, dict):
+        return "file is not a JSON object"
+    if "payload" not in doc:
+        return "no payload recorded"
+
+    prov = doc.get("provenance")
+    if prov is None:
+        return "no provenance recorded — cannot tell how this arrived"
+    if not isinstance(prov, dict):
+        return "provenance is not an object"
+
+    missing = [f for f in _REQUIRED_PROVENANCE if not prov.get(f)]
+    if missing:
+        return f"provenance is missing {', '.join(missing)}"
+
+    if prov["source"] not in LIVE_SOURCES:
+        return f"source is {prov['source']!r}, not a live Razorpay delivery"
+
+    key_id = str(prov["key_id"])
+    if not key_id.startswith("rzp_"):
+        return f"key_id {key_id[:12]!r} is not a Razorpay key"
+
+    if looks_fabricated(json.dumps(doc.get("payload", {}))):
+        return "payload carries this repository's own test identifiers"
+
+    return None
+
+
+def capture_payload(
+    event: str,
+    raw: bytes,
+    *,
+    source: str = "razorpay_webhook",
+    key_id: str = "",
+    overwrite: bool = False,
+) -> Path | None:
     """Record the first payload seen for `event` INTO THE INBOX. Never into evidence.
 
     First-write-wins. A later payload of the same type does not overwrite the
@@ -89,8 +145,20 @@ def capture_payload(event: str, raw: bytes, *, overwrite: bool = False) -> Path 
     except (ValueError, UnicodeDecodeError):
         return None  # unparseable bodies are recorded in the ledger, not here
 
+    # Provenance is recorded HERE, at the only moment we know how it arrived.
+    # `key_id` is the public half of the credential pair and is safe to record;
+    # the secret never touches this file.
+    document = {
+        "provenance": {
+            "source": source,
+            "received_at": utc_now_iso(),
+            "key_id": key_id,
+            "mode": "test" if key_id.startswith("rzp_test_") else "unknown",
+        },
+        "payload": parsed,
+    }
     path.write_text(
-        json.dumps(parsed, indent=2, sort_keys=True) + "\n",
+        json.dumps(document, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
         newline="",
     )
@@ -160,6 +228,14 @@ def promote_capture(event: str) -> Path:
             f"(INC-006). Delete {source} and capture a real one."
         )
 
+    problem = provenance_problem(source)
+    if problem is not None:
+        raise ValueError(
+            f"refusing to promote {event!r}: {problem}. Promotion asserts that "
+            f"Razorpay sent this; without provenance that assertion has nothing "
+            f"behind it, and the manifest would report it as evidence."
+        )
+
     CAPTURED_DIR.mkdir(parents=True, exist_ok=True)
     target = CAPTURED_DIR / _safe_name(event)
     target.write_text(text, encoding="utf-8", newline="")
@@ -167,16 +243,33 @@ def promote_capture(event: str) -> Path:
 
 
 def manifest() -> dict[str, str]:
-    """Which payload shapes are CAPTURED and which are INFERRED.
+    """What each payload shape IS, in three states — not merely whether a file exists.
 
-    Computed from the files that exist, never hand-maintained. A hand-written
-    list would drift from reality the moment a capture landed, and the drift
-    would be invisible.
+    * `CAPTURED` — present, with provenance saying a live Razorpay webhook
+      delivered it, against a named key, at a recorded time.
+    * `CAPTURED BUT UNVERIFIED` — a file is there and we cannot say it came from
+      Razorpay. **This is not evidence.** Reporting it as CAPTURED is exactly the
+      INC-006 failure: an artifact making a claim about the outside world that
+      nothing behind it supports.
+    * `INFERRED` — no file. The shape is read from documentation.
+
+    Computed from the files that exist and what they contain, never
+    hand-maintained. A hand-written list drifts the moment reality changes and
+    the drift is invisible.
     """
     out = {}
     for event in NEEDED_SHAPES:
-        if is_captured(event):
-            out[event] = "CAPTURED"
+        path = CAPTURED_DIR / _safe_name(event)
+        if path.exists():
+            problem = provenance_problem(path)
+            if problem is None:
+                prov = json.loads(path.read_text(encoding="utf-8"))["provenance"]
+                out[event] = (
+                    f"CAPTURED (live delivery {prov['received_at'][:10]}, "
+                    f"key {prov['key_id'][:13]}…)"
+                )
+            else:
+                out[event] = f"CAPTURED BUT UNVERIFIED — {problem}"
         elif event in CAPTURABLE_IN_TEST_MODE:
             out[event] = "INFERRED (capturable — run the demo against test mode)"
         else:

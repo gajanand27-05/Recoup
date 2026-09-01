@@ -180,7 +180,12 @@ def process_one(app: FastAPI, job: dict) -> str | None:
         try:
             body = json.loads(job["raw"])
             if isinstance(body, dict) and body.get("event"):
-                capture_payload(body["event"], job["raw"])
+                capture_payload(
+                    body["event"],
+                    job["raw"],
+                    source="razorpay_webhook",
+                    key_id=app.state.key_id,
+                )
         except (ValueError, UnicodeDecodeError):
             pass  # unparseable bodies are recorded in the ledger, not as fixtures
 
@@ -354,6 +359,7 @@ def create_app(
     *,
     run_id: str = "first-light",
     transport: str = "sim",
+    key_id: str = "",
 ) -> FastAPI:
     """Build the ingest app.
 
@@ -375,6 +381,10 @@ def create_app(
     app.state.queue = asyncio.Queue()
     app.state.run_id = run_id
     app.state.transport = transport
+    # Recorded into capture provenance so a fixture says which key it arrived
+    # against. This is the PUBLIC half of the credential pair; the secret is
+    # never passed here and never written to a fixture.
+    app.state.key_id = key_id
     app.state.worker_errors: list[tuple[str | None, str]] = []
 
     # One connection for the ledger AND seen_events, so the worker can commit a
