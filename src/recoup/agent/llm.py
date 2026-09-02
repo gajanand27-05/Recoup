@@ -341,6 +341,132 @@ class AnthropicLLM:
         return None  # an unusable proposal, not a configuration error
 
 
+def client_for(model: str):
+    """The client for a model id. Never a stub, and never a guess.
+
+    One place, so the eval, the batch runner and anything else agree on which
+    client a given `RECOUP_LLM_MODEL` means. An unrecognised id raises with the
+    known prefixes listed rather than falling through to something plausible --
+    a router that quietly picks a default is how a run ends up measuring a model
+    nobody chose.
+    """
+    if model.startswith("gemini"):
+        return GeminiLLM(model=model)
+    if model.startswith("claude"):
+        return AnthropicLLM(model=model)
+    if model in OLLAMA_MODELS or model.startswith("ollama/"):
+        return OllamaLLM(model=model.removeprefix("ollama/"))
+    raise ValueError(
+        f"RECOUP_LLM_MODEL={model!r} names no known client. Known prefixes: "
+        f"'gemini*', 'claude*', 'ollama/*', or one of {sorted(OLLAMA_MODELS)}. "
+        f"Add one rather than letting the run pick something."
+    )
+
+
+#: Ollama Cloud model ids used by this project. An explicit list rather than a
+#: catch-all `else: OllamaLLM(...)`, so a typo in RECOUP_LLM_MODEL is an error
+#: instead of a request to a model that does not exist.
+OLLAMA_MODELS = frozenset({"gpt-oss:120b", "gpt-oss:20b"})
+
+
+class OllamaLLM:
+    """Ollama Cloud, over plain HTTP with httpx — no SDK.
+
+    THE SCHEMA IS NOT ENFORCED BY THE PROVIDER
+    -------------------------------------------
+    Measured, not assumed. Three routes were probed with the same schema and the
+    same reply:
+
+    * `/api/chat` with `format=<json schema>`   -> ignored; invented its own keys
+    * `/v1/chat/completions` with `response_format: {json_schema, strict: true}`
+      -> ignored; invented its own keys
+    * `/api/chat` with `format` AND the schema spelled out in the system prompt
+      -> conformed
+
+    Both parameter routes return HTTP 200 and look exactly like a request that
+    was honoured. So the schema goes in the PROMPT, and `format` is sent as well
+    on the chance a later version starts enforcing it.
+
+    That is a genuinely weaker guarantee than Gemini's `response_schema` or
+    Anthropic's tool-use, and it is recorded as such (A-024). What does NOT
+    change: the output is validated by Pydantic at the boundary, so a
+    non-conforming answer is a caught failure that falls back to a
+    DETERMINISTIC-labelled action rather than a silently accepted one. Prose is
+    never parsed.
+    """
+
+    DEFAULT_HOST = "https://ollama.com"
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str = "gpt-oss:120b",
+        host: str | None = None,
+        timeout: float = 180.0,
+    ) -> None:
+        self._key = _require_key("OLLAMA_API_KEY", api_key, ("your-key", "ollama-xxxx"))
+        self.model = model
+        self._host = (host or os.getenv("OLLAMA_HOST") or self.DEFAULT_HOST).rstrip("/")
+        self._timeout = timeout
+
+    @property
+    def name(self) -> str:
+        return self.model
+
+    def _chat(self, system: str, user: str, schema: dict) -> dict | None:
+        import httpx
+
+        payload = {
+            "model": self.model,
+            "stream": False,
+            "format": schema,  # sent, but measured NOT to be honoured
+            "options": {"temperature": 0},
+            "messages": [
+                {
+                    "role": "system",
+                    # The schema in the prompt is the part that actually works.
+                    "content": (
+                        f"{system}\n\nReturn ONLY a JSON object matching this schema "
+                        f"exactly. Use these keys and no others:\n"
+                        f"{json.dumps(schema, indent=2)}"
+                    ),
+                },
+                {"role": "user", "content": user},
+            ],
+        }
+        response = httpx.post(
+            f"{self._host}/api/chat",
+            json=payload,
+            headers={"Authorization": f"Bearer {self._key}"},
+            timeout=self._timeout,
+        )
+        response.raise_for_status()
+        content = response.json().get("message", {}).get("content", "")
+        if not content:
+            return None
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            return None  # prose, or fenced JSON: not parsed, not guessed at
+
+    def classify_reply(self, text: str, today: str) -> dict:  # pragma: no cover - needs a key
+        from recoup.agent.prompts import REPLY_JSON_SCHEMA, REPLY_SYSTEM_PROMPT
+
+        out = self._chat(
+            REPLY_SYSTEM_PROMPT.format(today=today), text, REPLY_JSON_SCHEMA
+        )
+        if out is None:
+            raise ValueError(
+                f"{self.model} returned no usable JSON; refusing to guess at an intent"
+            )
+        return out
+
+    def propose_action(self, system: str, prompt: str) -> dict | None:  # pragma: no cover
+        from recoup.agent.prompts import PLANNER_JSON_SCHEMA
+
+        return self._chat(system, prompt, PLANNER_JSON_SCHEMA)
+
+
 class StubLLM:
     """Deterministic stand-in. **Its output may never appear in a reported figure.**
 

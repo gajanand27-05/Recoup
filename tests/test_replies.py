@@ -24,6 +24,8 @@ from pydantic import ValidationError
 from recoup.agent.llm import (
     DEFAULT_ANTHROPIC_MODEL,
     DEFAULT_GEMINI_MODEL,
+    NON_MODEL_SOURCES,
+    OLLAMA_MODELS,
     RATE_LIMIT_MAX_ATTEMPTS,
     STUB,
     AnthropicLLM,
@@ -33,6 +35,7 @@ from recoup.agent.llm import (
     StubLLM,
     _retry_after_seconds,
     call_through_rate_limit,
+    client_for,
     require_real_model,
 )
 from recoup.agent.replies import (
@@ -61,15 +64,7 @@ def _configured_client():
     """
     from recoup.config import Settings
 
-    model = Settings().llm_model
-    if model.startswith("gemini"):
-        return GeminiLLM(model=model)
-    if model.startswith("claude"):
-        return AnthropicLLM(model=model)
-    raise ValueError(
-        f"RECOUP_LLM_MODEL={model!r} names no known client. Add one rather than "
-        "letting the eval pick something."
-    )
+    return client_for(Settings().llm_model)
 
 
 # --- deterministic layer: no LLM, must be exact ------------------------------------
@@ -458,14 +453,51 @@ def test_retrying_gives_up_rather_than_waiting_forever():
 
 @pytest.mark.llm
 def test_intent_accuracy_meets_the_bar():  # pragma: no cover - needs a key
+    """Accuracy over the MODEL-classified subset, not over all 60.
+
+    The first run of this test failed at `require_real_model()`, and the guard was
+    right. `deterministic_opt_out()` runs upstream of the model on purpose — a
+    regulatory hard stop must not depend on a model's comprehension — so every
+    opt-out fixture carries `model_source="deterministic"`. An "accuracy over 60"
+    figure would have pooled two instruments and reported the number as the
+    model's, which is the same category error as pooling `sim` and `real`.
+
+    So the two are measured and printed separately. The deterministic matcher's
+    correctness is already pinned exactly by
+    `test_every_labelled_opt_out_is_caught_without_the_model`; what is unknown,
+    and what this measures, is the model's.
+    """
     fixtures = load_fixtures()
     client = _configured_client()
     results = [understand_reply(f["text"], client=client, today="2026-09-01") for f in fixtures]
-    require_real_model(results, run_id="task-19-eval")
 
-    correct = sum(r.intent == f["intent"] for r, f in zip(results, fixtures, strict=True))
-    accuracy = correct / len(fixtures)
-    print(f"\nintent accuracy: {accuracy:.1%} ({correct}/{len(fixtures)})")
+    pairs = list(zip(results, fixtures, strict=True))
+    by_model = [(r, f) for r, f in pairs if r.model_source not in NON_MODEL_SOURCES]
+    deterministic = [(r, f) for r, f in pairs if r.model_source in NON_MODEL_SOURCES]
+
+    model_id = require_real_model([r for r, _ in by_model], run_id="task-19-eval")
+
+    det_correct = sum(r.intent == f["intent"] for r, f in deterministic)
+    correct = sum(r.intent == f["intent"] for r, f in by_model)
+    accuracy = correct / len(by_model)
+
+    print("\n--- reply understanding eval -------------------------------")
+    print(f"model                : {model_id}")
+    print(f"fixtures             : {len(fixtures)}")
+    print(f"handled deterministic: {len(deterministic)} "
+          f"({det_correct}/{len(deterministic)} correct) -- opt-out matcher, not the model")
+    print(f"classified by model  : {len(by_model)}")
+    print(f"INTENT ACCURACY      : {accuracy:.1%} ({correct}/{len(by_model)})")
+
+    wrong = [
+        (f["text"][:40], f["intent"], r.intent)
+        for r, f in by_model
+        if r.intent != f["intent"]
+    ]
+    for text, expected, got in wrong:
+        print(f"  MISS  {text!r:48} expected={expected:<15} got={got}")
+    print("------------------------------------------------------------")
+
     assert accuracy >= 0.85
 
 
@@ -476,8 +508,55 @@ def test_promise_to_pay_date_extraction_meets_the_bar():  # pragma: no cover - n
     results = [understand_reply(f["text"], client=client, today="2026-09-01") for f in dated]
     require_real_model(results, run_id="task-19-eval")
 
-    pairs = zip(results, dated, strict=True)
+    pairs = list(zip(results, dated, strict=True))
     correct = sum(r.promised_date == f["promised_date"] for r, f in pairs)
     accuracy = correct / len(dated)
-    print(f"\ndate extraction: {accuracy:.1%} ({correct}/{len(dated)})")
+    print(f"\nDATE EXTRACTION      : {accuracy:.1%} ({correct}/{len(dated)})")
+    for r, f in pairs:
+        if r.promised_date != f["promised_date"]:
+            print(f"  MISS  {f['text'][:40]!r:44} "
+                  f"expected={f['promised_date']} got={r.promised_date}")
     assert accuracy >= 0.80
+
+
+# --- Ollama Cloud: the schema is NOT enforced by the provider (A-024) ---------------
+
+
+def test_the_router_knows_every_configured_model():
+    """A router that quietly picks a default is how a run measures a model nobody
+    chose. An unrecognised id must raise, not fall through."""
+    with pytest.raises(ValueError, match="no known client"):
+        client_for("some-model-nobody-configured")
+
+
+def test_the_router_refuses_an_ollama_typo():
+    """`gpt-oss:120B` is not `gpt-oss:120b`. Falling through to a request for a
+    model that does not exist wastes a batch to find out."""
+    with pytest.raises(ValueError, match="no known client"):
+        client_for("gpt-oss:120B")
+
+
+@pytest.mark.parametrize("model", sorted(OLLAMA_MODELS))
+def test_an_ollama_client_refuses_to_exist_without_a_key(model, monkeypatch):
+    monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="OLLAMA_API_KEY"):
+        client_for(model)
+
+
+def test_an_ollama_client_reports_the_specific_model_id(monkeypatch):
+    """Not 'ollama'. The vendor cannot tell 120b from 20b, and those are two
+    instruments -- require_real_model() refuses to pool them."""
+    monkeypatch.setenv("OLLAMA_API_KEY", "test-key-not-real")
+    assert client_for("gpt-oss:120b").name == "gpt-oss:120b"
+    assert client_for("ollama/gpt-oss:20b").name == "gpt-oss:20b"
+
+
+def test_two_ollama_tiers_are_refused_as_one_figure(monkeypatch):
+    from types import SimpleNamespace
+
+    results = [
+        SimpleNamespace(model_source="gpt-oss:120b"),
+        SimpleNamespace(model_source="gpt-oss:20b"),
+    ]
+    with pytest.raises(ModelProvenanceError, match="two instruments"):
+        require_real_model(results, run_id="run-ollama-mixed")
