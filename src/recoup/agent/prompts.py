@@ -97,3 +97,84 @@ REPLY_TOOL = {
         "required": ["intent", "promised_date", "confidence", "evidence"],
     },
 }
+
+
+# --- the planner (Task 20) -------------------------------------------------------
+#
+# The model does NOT write message bodies. It picks a registered template and
+# fills its variables, because under DLT a body that does not match its
+# registered template is not sendable however well it reads. Free-text copy from
+# a model is unsendable at best; if the compliance flag were asserted rather than
+# computed it would be illegal-and-passing, which is worse.
+
+_TEMPLATE_RULE = """You choose from REGISTERED templates. You do not write copy.
+
+A message body that does not exactly match its registered template cannot be
+sent in India under TRAI/DLT rules, whoever wrote it and however reasonable it
+reads. Variables are short slots -- a name, an amount, a link. A variable
+containing a sentence is rejected, so you cannot add persuasion through one.
+
+You may never propose a charge. After a subscription halts there is no mandate
+left to debit against; outreach and payment links are the only actions that
+exist. There is no action_type that would charge someone."""
+
+PLANNER_SYSTEM = f"""You decide the next recovery step for a subscription whose \
+payment failed three times and is now halted.
+
+{_TEMPLATE_RULE}
+
+Choose the template, the delay in hours, and the variable values. Prefer fewer,
+better-timed messages over more messages. If the customer has had several
+attempts with no response, or the decline is hard and they need a new payment
+method, proposing `stop` is a real answer and often the right one."""
+
+REPLAN_SYSTEM = f"""Your previous proposal was REJECTED by a policy engine that \
+sits outside you and that you cannot argue with.
+
+{_TEMPLATE_RULE}
+
+You will be shown the exact rules that fired, their legal class, and their
+sources. Address them. Do not restate the rejected proposal with softer wording:
+if a rule fired on the template you chose, choose a different template or
+propose `stop`. A second rejection wastes the attempt."""
+
+PLANNER_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "action_type": {"type": "string", "enum": ["send_message", "wait", "stop"]},
+        "template_id": {
+            "type": "string",
+            "description": "One of the offered template ids. Required for send_message.",
+        },
+        "hours_from_now": {"type": "integer"},
+        "variables": {
+            "type": "object",
+            "description": "Values for the template's slots, e.g. name, amount.",
+            "properties": {
+                "name": {"type": "string"},
+                "amount": {"type": "string"},
+            },
+        },
+        "rationale": {"type": "string"},
+    },
+    "required": ["action_type", "rationale"],
+}
+
+PLANNER_TOOL = {
+    "name": "propose_recovery_action",
+    "description": "Propose the next recovery action for a halted subscription.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "action_type": {"type": "string", "enum": ["send_message", "wait", "stop"]},
+            "template_id": {
+                "type": "string",
+                "description": "One of the offered template ids.",
+            },
+            "hours_from_now": {"type": "integer", "minimum": 0, "maximum": 336},
+            "variables": {"type": "object", "additionalProperties": {"type": "string"}},
+            "rationale": {"type": "string"},
+        },
+        "required": ["action_type", "rationale"],
+    },
+}

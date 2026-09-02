@@ -33,3 +33,19 @@ class Action(BaseModel):
 
     uses_rzp_reminder: bool = False
     rationale: str = ""
+
+    # Which model decided this, or `deterministic` when nothing did. Carried on
+    # the action rather than inferred later, because by report time a fallback
+    # and a model decision are indistinguishable -- both are just an Action that
+    # got sent. `require_real_model()` refuses to report over a mixture, so a run
+    # where the model kept failing schema cannot be presented as a model's work.
+    #
+    # None means "not set by anyone", which is different from `deterministic`
+    # ("nothing decided this, and we know") and is refused just as loudly.
+    model_source: str | None = None
+
+    # How many times this action has already been re-proposed after a veto. A
+    # real field rather than something the planner keeps on the side: it has to
+    # survive being handed back through the policy engine, and a counter that
+    # lives in the agent would reset every time the batch reconstructs one.
+    replans: int = 0

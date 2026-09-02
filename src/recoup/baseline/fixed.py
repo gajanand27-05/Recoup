@@ -34,6 +34,7 @@ not a control.
 from datetime import datetime, timedelta
 
 from recoup.models import Action
+from recoup.render.templates import render
 
 # --- DERIVED from the frozen curve + Recurly's 10-day window -------------------
 # Cumulative recovery, soft decline, whatsapp, full attempt decay:
@@ -159,22 +160,28 @@ class FixedIntervalOutreach:
 
         send_at = self._send_time(now)
 
+        # Rendered through the registry rather than formatted here, so
+        # `body_matches_registered_template` is COMPUTED. It used to be passed
+        # as True with a comment saying there was nothing to compute -- which
+        # was true of the body, and not true of the claim. A hand-asserted
+        # compliance flag is the proxy-guard shape: it reports on the caller's
+        # intention rather than on the message.
+        rendered = render(
+            DLT_TEMPLATE_ID,
+            {"amount": str(context.get("amount_paise", 0) // 100), "link": "{link}"},
+        )
+
         return Action(
             action_type="send_message",
             channel=FIXED_CHANNEL,
-            body=FIXED_BODY.format(
-                amount=context.get("amount_paise", 0) // 100, link="{link}"
-            ),
+            body=rendered.body,
             send_at=send_at,
             attempt_no=attempt_no,
             cost_paise=COST_PAISE[FIXED_CHANNEL],
             wa_template_category="UTILITY",
-            dlt_template_id=DLT_TEMPLATE_ID,
+            dlt_template_id=rendered.dlt_template_id,
             dlt_template_approved=True,
-            # The control renders one registered template verbatim, so this is
-            # true by construction rather than by assertion. The agent's renderer
-            # must COMPUTE it (Task 19); here there is nothing to compute.
-            body_matches_registered_template=True,
+            body_matches_registered_template=rendered.matches_registered_template,
             uses_rzp_reminder=False,
             rationale="fixed schedule, no decisioning",
         )

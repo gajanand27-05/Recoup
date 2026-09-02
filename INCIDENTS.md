@@ -522,3 +522,129 @@ artifact it produced was a claim about a third party.
 Anything that writes into the repository from a code path the tests exercise will eventually
 be written by the tests. If that artifact is evidence, the write must require a deliberate
 human act — not a default, and not a flag.
+
+---
+
+## INC-007 — The control arm could not send a single message, and nothing said so
+
+**2026-09-01, found during Task 18 implementation. Not found by a guard.**
+
+**What happened**
+
+`baseline/fixed.py` built its `Action` without `body_matches_registered_template`. The field
+defaults to `False`, which is deliberate — DLT-008 reads `msg.body_matches_registered_template`
+and a message built without going through template rendering should be vetoed rather than
+waved through.
+
+So every control message was vetoed by DLT-008. The control arm would have sent nothing,
+recovered nothing, and reported a denominator of zero recoveries.
+
+**Why this is worse than a crash**
+
+Nothing fails. The suite was green. Both halves were individually correct: the control
+produced an action with the right schedule and the right copy, and the policy engine
+correctly vetoed it. The defect lived in the gap between two things that each worked.
+
+And the consequence is not a missing number — it is a **wrong** one. Treatment recovers at
+its normal rate, control recovers ~0, and measured lift becomes enormous. That number would
+have been the submission. It is the INC-006 class: false evidence, not silent failure.
+
+**How it was actually found**
+
+By writing the integration and watching it, not by any guard. PLAN.md's Task 18 listing
+omitted the field, and the omission was invisible reading either file alone.
+
+**The fix**
+
+Two parts, because setting the flag would have been a fix and not a closure.
+
+1. `src/recoup/render/templates.py` — a template registry, and `body_matches()` which
+   **computes** whether a body matches its registered template. Both arms now render through
+   it, so the flag is earned rather than asserted. The control's exact wording is registered
+   as `TPL_BASELINE_001` rather than switching the control to new copy: its copy was fixed
+   before any lift number existed, and rewording it afterwards would be a change to the
+   comparison baseline made after the fact.
+
+2. `tests/test_arm_policy_coverage.py` — walks the **arm registry** (`assign/registry.py`)
+   and puts each arm's real action through the real policy engine. Parametrised over
+   `DECIDERS`, so an arm added later without policy coverage fails rather than passing by
+   omission. A test naming its arms in a literal list would go green on an arm it had never
+   heard of.
+
+**Planted, and it fired**
+
+Each arm's action had each required field stripped in turn:
+
+| arm | field stripped | denials |
+|---|---|---|
+| control | `body_matches_registered_template` | `DLT-008` |
+| control | `dlt_template_approved` | `DLT-001` |
+| treatment | `body_matches_registered_template` | `DLT-008` |
+| treatment | `dlt_template_approved` | `DLT-001` |
+
+Four for four, and `DLT-008` is the exact rule that caused the incident.
+
+**A second finding, from the guard's first run**
+
+The treatment arm proposed a 6th message and was vetoed by `STOP-001` (cap: 5). That is
+correct behaviour, and the first version of the test called it a failure. The assertion was
+wrong, not the system: a STOP-class veto means the arm has spent its permitted attempts,
+while a content veto means the arm can never send at all. Only the second is INC-007. The
+test now distinguishes them and asserts each arm gets its full quota out.
+
+**Lesson kept**
+
+A field whose safe default is "refuse" is a good default and a bad silence. Every consumer
+that must set it should be enumerable, and the enumeration should be the thing the test
+walks — not a list someone maintains.
+
+---
+
+## INC-008 — Six minutes spent waiting for a quota that resets tomorrow
+
+**2026-09-01, found by running the eval rather than by reasoning about the retry.**
+
+**Numbering note, recorded rather than corrected:** commit `b7ae1d6` calls this incident
+"INC-007" in its message. That number was later assigned to the control-arm defect above, on
+instruction. The commit message is wrong and is left alone — the history is not rewritten to
+tidy a label.
+
+**What happened**
+
+The Gemini free tier has two quotas, and the retry logic knew about one:
+
+| quotaId | limit |
+|---|---|
+| `GenerateRequestsPerMinutePerProjectPerModel-FreeTier` | 5 / minute |
+| `GenerateRequestsPerDayPerProjectPerModel-FreeTier` | **20 / day** |
+
+`call_through_rate_limit` was written for the first. Google returns both as a plain 429
+carrying a `RetryInfo`, and the per-day `RetryInfo` still says ~59s — true only in the sense
+that retrying then also fails. So the eval slept 59 seconds, six times, against a quota that
+resets on a daily boundary. Total runtime 11m33s to reach a failure that was knowable on the
+first response.
+
+**The fix**
+
+`_is_daily_quota()` reads the `quotaId`, which is the only thing distinguishing them, and
+`_retry_after_seconds()` raises `DailyQuotaExhausted` rather than returning a wait.
+
+**Planted, and it fired**
+
+With `_is_daily_quota` forced to `False` — the pre-fix behaviour exactly — the case takes
+6 attempts and sleeps `[60, 60, 60, 60, 60]`. With the fix: 1 attempt, no sleep. Both 429
+fixtures in the test are copied verbatim from the failures they describe rather than written
+to match the parser.
+
+**Consequence for the claim**
+
+The 60-fixture accuracy eval cannot complete at 20 requests/day. Task 19 remains **built, not
+exercised**. The accuracy over the 20 items that did get through is **not** reported:
+selecting the measurable prefix of a run that stopped early is optional stopping, which
+`EXPERIMENT.md` forbids.
+
+**Lesson kept**
+
+A retry that cannot tell "wait a minute" from "come back tomorrow" converts a clear failure
+into a slow one. When an API distinguishes two conditions in its payload and the client
+collapses them, the client has invented an assumption the server never made.

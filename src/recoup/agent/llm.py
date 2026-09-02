@@ -56,6 +56,16 @@ class LLMTransport(Protocol):
 
     def classify_reply(self, text: str, today: str) -> dict: ...
 
+    def propose_action(self, system: str, prompt: str) -> dict | None:
+        """Structured plan, or None when the model returned nothing usable.
+
+        None rather than an exception: an unusable proposal is an ordinary event
+        in a 2,000-subscription batch, and the caller has a labelled
+        deterministic path for it. A missing KEY still raises -- that is a
+        configuration error, not a bad answer.
+        """
+        ...
+
 
 class ModelProvenanceError(RuntimeError):
     """Output reached a reported figure that should not have."""
@@ -250,6 +260,32 @@ class GeminiLLM:
             )
         return json.loads(raw)
 
+    def propose_action(self, system: str, prompt: str) -> dict | None:  # pragma: no cover
+        genai = _require_sdk("google.genai", "gemini")
+        types = _require_sdk("google.genai.types", "gemini")
+
+        from recoup.agent.prompts import PLANNER_JSON_SCHEMA
+
+        client = genai.Client(api_key=self._key)
+        config = types.GenerateContentConfig(
+            system_instruction=system,
+            response_mime_type="application/json",
+            response_schema=PLANNER_JSON_SCHEMA,
+            temperature=0.0,
+        )
+        response = call_through_rate_limit(
+            lambda: client.models.generate_content(
+                model=self.model, contents=prompt, config=config
+            )
+        )
+        raw = getattr(response, "text", None)
+        if not raw:
+            return None  # an unusable proposal, not a configuration error
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+
 
 class AnthropicLLM:
     """Anthropic via tool-use. Kept alongside Gemini: the boundary supports more
@@ -285,6 +321,25 @@ class AnthropicLLM:
                 return dict(block.input)
         raise ValueError("model returned no tool call; refusing to parse prose")
 
+    def propose_action(self, system: str, prompt: str) -> dict | None:  # pragma: no cover
+        anthropic = _require_sdk("anthropic", "anthropic")
+
+        from recoup.agent.prompts import PLANNER_TOOL
+
+        client = anthropic.Anthropic(api_key=self._key)
+        response = client.messages.create(
+            model=self.model,
+            max_tokens=1024,
+            system=system,
+            tools=[PLANNER_TOOL],
+            tool_choice={"type": "tool", "name": PLANNER_TOOL["name"]},
+            messages=[{"role": "user", "content": prompt}],
+        )
+        for block in response.content:
+            if block.type == "tool_use":
+                return dict(block.input)
+        return None  # an unusable proposal, not a configuration error
+
 
 class StubLLM:
     """Deterministic stand-in. **Its output may never appear in a reported figure.**
@@ -316,3 +371,14 @@ class StubLLM:
             "confidence": 0.0,  # a stub is never confident; it is not a model
             "evidence": "stub keyword match — NOT a model classification",
         }
+
+    def propose_action(self, system: str, prompt: str) -> dict | None:
+        """Always None, on purpose.
+
+        A stub that returned a plausible plan would produce a treatment arm that
+        runs end to end, writes ledger rows, and yields a lift number with no
+        model behind it. Returning None instead drives the planner's labelled
+        deterministic path, and `require_real_model()` then refuses to report
+        over it -- so a stubbed run fails at the CLAIM rather than at the run.
+        """
+        return None
