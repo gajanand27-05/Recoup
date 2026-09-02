@@ -13,9 +13,21 @@ event, so the format is fixed here rather than at each call site.
 from datetime import UTC, datetime
 
 
+def now_utc() -> datetime:
+    """Current time as an aware UTC datetime.
+
+    Here rather than at the call site for the same reason `utc_now_iso()` is: a
+    batch that needs to do arithmetic on 'now' (day offsets across a horizon)
+    needs a datetime rather than a string, and letting it reach for
+    `datetime.now()` itself is how a naive one enters the system. Everything that
+    formats goes through `to_iso_z`, which rejects naive input.
+    """
+    return datetime.now(UTC)
+
+
 def utc_now_iso() -> str:
     """Current UTC time as `2026-08-29T21:16:03.123456Z`."""
-    return to_iso_z(datetime.now(UTC))
+    return to_iso_z(now_utc())
 
 
 def to_iso_z(dt: datetime) -> str:

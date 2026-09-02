@@ -397,6 +397,21 @@ class OllamaLLM:
 
     DEFAULT_HOST = "https://ollama.com"
 
+    #: MEASURED 2026-09-02 by ramping width 1/2/4/8/16 against the live API:
+    #: 1, 2 and 4 were clean; 8 returned one `429 too many concurrent requests`;
+    #: 16 returned nine. So the provider's ceiling is ~7 simultaneous requests.
+    OBSERVED_CONCURRENCY_LIMIT = 7
+    #: ASSUMPTION: working concurrency, chosen below the observed ceiling with
+    #: margin rather than at it. Sweep range if ever swept: 1..6.
+    SAFE_CONCURRENCY = 4
+
+    #: ASSUMPTION: a concurrency 429 is transient and clears in about the time one
+    #: request takes. This is a THIRD distinct meaning of 429 in this codebase --
+    #: not Gemini's per-minute quota and not its per-day quota. Sweep range: 1..10s.
+    CONCURRENCY_BACKOFF_SECONDS = 3.0
+    #: ASSUMPTION: attempts before giving up on a concurrency 429. Sweep: 2..8.
+    CONCURRENCY_MAX_ATTEMPTS = 5
+
     def __init__(
         self,
         api_key: str | None = None,
@@ -434,12 +449,31 @@ class OllamaLLM:
                 {"role": "user", "content": user},
             ],
         }
-        response = httpx.post(
-            f"{self._host}/api/chat",
-            json=payload,
-            headers={"Authorization": f"Bearer {self._key}"},
-            timeout=self._timeout,
-        )
+        response = None
+        for attempt in range(1, self.CONCURRENCY_MAX_ATTEMPTS + 1):
+            response = httpx.post(
+                f"{self._host}/api/chat",
+                json=payload,
+                headers={"Authorization": f"Bearer {self._key}"},
+                timeout=self._timeout,
+            )
+            if response.status_code != 429:
+                break
+            # A THIRD meaning of 429, distinct from Gemini's per-minute and
+            # per-day quotas: "too many concurrent requests". It clears on its
+            # own, so it is waited out rather than treated as exhaustion --
+            # but only up to a bound, because a permanent 429 that is retried
+            # forever is a batch that never finishes and never says why.
+            if attempt == self.CONCURRENCY_MAX_ATTEMPTS:
+                raise RuntimeError(
+                    f"{self.model}: {self.CONCURRENCY_MAX_ATTEMPTS} consecutive "
+                    f"429s from {self._host}. Observed ceiling is "
+                    f"{self.OBSERVED_CONCURRENCY_LIMIT} concurrent requests "
+                    f"(measured 2026-09-02); reduce concurrency rather than "
+                    f"retrying into it. Body: {response.text[:200]}"
+                )
+            time.sleep(self.CONCURRENCY_BACKOFF_SECONDS * attempt)
+
         response.raise_for_status()
         content = response.json().get("message", {}).get("content", "")
         if not content:
