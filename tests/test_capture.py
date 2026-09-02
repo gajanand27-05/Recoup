@@ -384,20 +384,101 @@ def test_promoting_something_never_observed_exits_nonzero(isolated, capsys):
     assert "no observed payload" in capsys.readouterr().err
 
 
-def test_the_ingest_calls_capture_for_a_real_transport():
+def test_the_ingest_calls_capture_for_a_real_transport(isolated, tmp_path):
     """Otherwise this is a mechanism with no caller — the INC-005 shape.
 
-    Checked against the artifact: the ingest module must actually reference it.
+    RUN, not scanned. This test used to walk the ingest module's AST and assert
+    that `capture_payload` appeared in a call position. That is a proxy: the name
+    appearing in the source is not the call executing, and a call sitting in an
+    unreachable branch — behind a condition that is never true, in a handler that
+    never fires — passes an AST scan exactly like a live one does.
+
+    Which is the defect this project keeps finding. `mark_processed()` had no
+    production caller, the `--expect-head` reader had no writer, and the
+    `MAX_ATTEMPTS` counter sat outside the `try`. Every one of those would have
+    passed a scan for its own name.
+
+    So: post a signed webhook at a `real`-transport app, drain the worker, and
+    look in the inbox for the bytes.
     """
-    import ast
+    import hashlib
+    import hmac
+    import json
 
-    from recoup.ingest import app as app_mod
+    from fastapi.testclient import TestClient
 
-    source = Path(app_mod.__file__).read_text(encoding="utf-8")
-    tree = ast.parse(source)
-    called = {
-        node.func.id
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-    }
-    assert "capture_payload" in called, "the ingest never calls capture_payload"
+    from recoup.ingest.app import create_app, drain
+
+    secret = "capture-path-secret"
+    app = create_app(
+        db_path=str(tmp_path / "capture_path.db"),
+        webhook_secret=secret,
+        run_id="capture-path",
+        transport="real",
+        key_id=KEY,
+    )
+
+    raw = json.dumps(HALTED).encode()
+    with TestClient(app) as client:
+        response = client.post(
+            "/webhook",
+            content=raw,
+            headers={
+                "X-Razorpay-Signature": hmac.new(
+                    secret.encode(), raw, hashlib.sha256
+                ).hexdigest(),
+                "x-razorpay-event-id": "evt_capture_path",
+                "Content-Type": "application/json",
+            },
+        )
+        assert response.status_code == 202
+        drain(app)
+
+    written = sorted(p.name for p in isolated.glob("*.json")) if isolated.exists() else []
+    assert written, (
+        "a real-transport webhook was accepted and processed, and nothing "
+        "reached the capture inbox — capture_payload is not on the live path"
+    )
+
+    # And it stayed OBSERVED. Reaching the inbox must not make it evidence.
+    assert manifest()["subscription.halted"].startswith(("INFERRED", "not capturable"))
+
+
+def test_a_sim_transport_webhook_captures_nothing(isolated, tmp_path):
+    """The other half of the claim. If `sim` also captured, the inbox would fill
+    with replayed fixtures and 'observed' would stop meaning anything."""
+    import hashlib
+    import hmac
+    import json
+
+    from fastapi.testclient import TestClient
+
+    from recoup.ingest.app import create_app, drain
+
+    secret = "capture-path-secret"
+    app = create_app(
+        db_path=str(tmp_path / "capture_sim.db"),
+        webhook_secret=secret,
+        run_id="capture-sim",
+        transport="sim",
+    )
+
+    raw = json.dumps(HALTED).encode()
+    with TestClient(app) as client:
+        client.post(
+            "/webhook",
+            content=raw,
+            headers={
+                "X-Razorpay-Signature": hmac.new(
+                    secret.encode(), raw, hashlib.sha256
+                ).hexdigest(),
+                "x-razorpay-event-id": "evt_capture_sim",
+                "Content-Type": "application/json",
+            },
+        )
+        drain(app)
+
+    assert not isolated.exists() or not list(isolated.glob("*.json")), (
+        "a sim-transport webhook reached the capture inbox; replayed fixtures "
+        "would then be indistinguishable from observed deliveries"
+    )
