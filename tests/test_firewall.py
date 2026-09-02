@@ -309,15 +309,21 @@ def test_every_way_of_actually_reading_the_label_is_caught(tmp_path, snippet):
 
 
 def test_the_firewall_fires_on_a_violating_lift_module():
-    """lift.py does not exist yet, so the closure check above is vacuous for it.
+    """Written when lift.py did not exist, and kept now that it does.
 
-    A guard whose subject does not exist has never been shown to fire. This
-    writes a genuinely violating lift.py into the real source tree, confirms both
-    checks catch it, and removes it — so the firewall is known to work before the
-    module it protects is written.
+    A guard whose subject does not exist has never been shown to fire, so this
+    writes a genuinely violating module into the real source tree, confirms both
+    checks catch it, and removes it.
+
+    It plants `_planted_lift.py` rather than `lift.py`. The first version used
+    the real name and asserted the file was absent — which was true while the
+    module was unwritten and became a collision the moment Task 22 landed. The
+    firewall's own name for the real module is checked by
+    `test_lift_module_reaches_no_forbidden_import` above; this one is about
+    whether the CHECKER fires, and any module name proves that.
     """
-    planted = SRC / "recoup" / "eval" / "lift.py"
-    assert not planted.exists(), "lift.py already exists; this test would clobber it"
+    planted = SRC / "recoup" / "eval" / "_planted_lift.py"
+    assert not planted.exists(), "a previous run left the plant behind"
 
     planted.write_text(
         "from recoup.simulator.generator import Scenario\n"
@@ -327,7 +333,7 @@ def test_the_firewall_fires_on_a_violating_lift_module():
         encoding="utf-8",
     )
     try:
-        reachable = transitive_imports("recoup.eval.lift")
+        reachable = transitive_imports("recoup.eval._planted_lift")
         assert "recoup.simulator.generator" in reachable, "import closure missed the violation"
         assert label_references(planted), "label scan missed the violation"
     finally:
@@ -343,7 +349,7 @@ def test_the_firewall_fires_on_an_indirect_violation():
     Nothing in lift.py itself is wrong, and the label never appears in it.
     """
     helper = SRC / "recoup" / "eval" / "_planted_helper.py"
-    planted = SRC / "recoup" / "eval" / "lift.py"
+    planted = SRC / "recoup" / "eval" / "_planted_lift.py"
     assert not planted.exists() and not helper.exists()
 
     helper.write_text(
@@ -368,10 +374,10 @@ def test_the_firewall_fires_on_an_indirect_violation():
         assert "recoup.simulator.generator" not in direct_imports(planted), (
             "the direct check must NOT see this -- that is the point of the test"
         )
-        assert "recoup.simulator.generator" in transitive_imports("recoup.eval.lift"), (
-            "the transitive check missed an indirect route to the labels"
-        )
-        assert label_references(planted) == [], "the label genuinely does not appear in lift.py"
+        assert "recoup.simulator.generator" in transitive_imports(
+            "recoup.eval._planted_lift"
+        ), "the transitive check missed an indirect route to the labels"
+        assert label_references(planted) == [], "the label genuinely does not appear here"
     finally:
         planted.unlink()
         helper.unlink()
