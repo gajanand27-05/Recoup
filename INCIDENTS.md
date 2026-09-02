@@ -648,3 +648,62 @@ selecting the measurable prefix of a run that stopped early is optional stopping
 A retry that cannot tell "wait a minute" from "come back tomorrow" converts a clear failure
 into a slow one. When an API distinguishes two conditions in its payload and the client
 collapses them, the client has invented an assumption the server never made.
+
+---
+
+## INC-009 — 247 recoveries recorded, 0 visible to the thing that reports them
+
+**2026-09-02, found by checking the live run rather than by any test.**
+
+**What happened**
+
+The batch runner recorded recovery as a `recovered: true` flag inside the `action.executed`
+payload. `replay()` — the canonical reader, and what the report consumes — takes recovery
+**only** from a separate `outcome.recovered` event, which the runner never emitted.
+
+Measured against the N=2,000 run while it was in flight:
+
+```
+ledger rows read                       : 3464
+subscriptions replayed                 : 845
+rows whose payload says recovered=true : 247
+subscriptions replay reports recovered : 0
+event types written                    : ['action.executed']
+```
+
+**Why this is the worst shape available**
+
+It does not fail. Both arms report a 0% recovery rate, the difference is exactly 0.00 pp, the
+interval is tight around zero and the p-value is 1.0. That reads as a careful null result —
+*"the agent did not beat the control"* — and it would have been the submission.
+
+**The runner's own counters were correct the entire time.** Its summary said 247 recoveries,
+and it was right. Every existing test asserted on those counters, so every one passed. The
+defect lived entirely in the gap between what the writer writes and what the reader reads —
+the same gap as INC-007, one boundary further along.
+
+**The fix**
+
+The runner emits `outcome.recovered` with `amount_paise`. The tests now cross the boundary
+rather than asserting on either side of it: runner → ledger → `replay()` → `LiftView` →
+`compute_lift`. One of them asserts that a lift of exactly 0.00 with both rates at zero does
+not occur, because that is the signature of a broken pipeline wearing the clothes of a null
+result.
+
+**Planted, and it fired**
+
+Deleting the emitter — the pre-fix state exactly — fails all four round-trip tests. Before
+they existed, the same deletion left the suite green.
+
+**Cost**
+
+The run was killed at 821/2,000 and restarted from zero. Resume could not salvage it: the
+completed subscriptions are in the checkpoint, so a resumed run would skip them and they would
+never receive their outcome rows, leaving a half-readable ledger.
+
+**Lesson kept**
+
+An assertion on the writer's own counters is an assertion about the writer's intentions. When
+two modules exchange data through an artifact, the test has to read the artifact with the
+consumer's reader — not with a re-implementation of it, and not with the producer's own view
+of what it wrote.

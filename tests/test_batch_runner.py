@@ -69,11 +69,20 @@ def _runner(tmp_path, client=None, **kw):
 
 
 def _refs(db_path) -> list[str]:
+    """reference_ids of ACTION rows only.
+
+    `outcome.recovered` rows carry the same reference_id as the action that
+    caused them — deliberate linkage, so a recovery can be traced to the message
+    that produced it. The uniqueness invariant is therefore "one action.executed
+    per reference_id", not "one row per reference_id".
+    """
     conn = sqlite3.connect(str(db_path))
     try:
         return [
             json.loads(r[0])["reference_id"]
-            for r in conn.execute("SELECT payload FROM ledger")
+            for r in conn.execute(
+                "SELECT payload FROM ledger WHERE event_type = 'action.executed'"
+            )
         ]
     finally:
         conn.close()
@@ -266,7 +275,9 @@ def test_no_row_records_a_charge(tmp_path):
     try:
         types = {
             json.loads(r[0])["action_type"]
-            for r in conn.execute("SELECT payload FROM ledger")
+            for r in conn.execute(
+                "SELECT payload FROM ledger WHERE event_type = 'action.executed'"
+            )
         }
     finally:
         conn.close()
@@ -320,3 +331,108 @@ def test_the_runner_never_calls_datetime_now_at_a_call_site(now):
 
     source = inspect.getsource(mod)
     assert "datetime.now(" not in source, "call recoup.clock.now_utc() instead"
+
+
+# --- the round trip: what the batch WRITES must be what the eval READS ----------
+
+
+def _replayed(db_path, run_id="t"):
+    """Read the run back the way the report does, not the way the writer does."""
+    import sqlite3
+
+    from recoup.ledger.replay import replay
+
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = []
+        for r in conn.execute("SELECT * FROM ledger WHERE run_id = ?", (run_id,)):
+            d = dict(r)
+            d["payload"] = json.loads(d["payload"])
+            rows.append(d)
+    finally:
+        conn.close()
+    return replay(rows), rows
+
+
+def test_replay_can_see_the_recoveries_the_batch_recorded(tmp_path):
+    """THE DEFECT THIS EXISTS FOR.
+
+    The runner first recorded recovery as a `recovered: true` flag inside the
+    `action.executed` payload. `replay()` reads recovery ONLY from a separate
+    `outcome.recovered` event, so it reported zero recoveries for every
+    subscription — while 247 rows in a live run said otherwise.
+
+    Both arms would then have shown a 0% recovery rate, and the lift would have
+    come out exactly 0.00 pp with a tight interval: a clean-looking null result
+    rather than an error. Nothing raised. The suite was green.
+
+    Asserting the runner's own counters is not enough — those were right the
+    whole time. The assertion has to cross the boundary.
+    """
+    summary = _runner(tmp_path).run(60, progress_every=0)
+    states, rows = _replayed(tmp_path / "b.db")
+
+    counted = sum(ArmStats(**s).recovered for s in summary.arms.values())
+    assert counted > 0, "no recoveries in this cohort; the test proves nothing"
+
+    replayed = sum(1 for s in states.values() if s.recovered_paise > 0)
+    assert replayed == counted, (
+        f"the runner counted {counted} recoveries and replay found {replayed}. "
+        f"The eval reads replay, so the report would show {replayed}."
+    )
+
+
+def test_the_run_emits_the_event_type_replay_reads(tmp_path):
+    """Named explicitly, so deleting the emitter fails here rather than silently
+    zeroing the headline."""
+    _runner(tmp_path).run(60, progress_every=0)
+    _, rows = _replayed(tmp_path / "b.db")
+    kinds = {r["event_type"] for r in rows}
+    assert "action.executed" in kinds
+    assert "outcome.recovered" in kinds, (
+        f"only {sorted(kinds)} were written; replay() reads recovery from "
+        f"'outcome.recovered' and would report a 0% rate for both arms"
+    )
+
+
+def test_views_built_from_the_run_carry_non_zero_recovery(tmp_path):
+    """One step further: the projection lift.py actually consumes."""
+    from recoup.eval.views import LiftView
+
+    _runner(tmp_path).run(60, progress_every=0)
+    states, _ = _replayed(tmp_path / "b.db")
+    views = [
+        LiftView.from_state(s, amount_paise=49900)
+        for s in states.values()
+        if s.arm is not None
+    ]
+    assert views, "no views could be built from the run"
+    assert any(v.recovered_paise > 0 for v in views), (
+        "every view reports zero recovered — the lift would be 0.00 pp in both arms"
+    )
+    assert any(v.spend_paise > 0 for v in views), "every view reports zero spend"
+
+
+def test_a_lift_computed_from_the_run_is_not_structurally_zero(tmp_path):
+    """End to end: runner -> ledger -> replay -> view -> lift.
+
+    A lift of exactly 0.00 with both rates at zero is the signature of a broken
+    pipeline, not of an ineffective agent. This distinguishes them.
+    """
+    from recoup.eval.lift import compute_lift
+    from recoup.eval.views import LiftView
+
+    _runner(tmp_path).run(80, progress_every=0)
+    states, rows = _replayed(tmp_path / "b.db")
+    views = [
+        LiftView.from_state(s, amount_paise=49900)
+        for s in states.values()
+        if s.arm is not None
+    ]
+    result = compute_lift(views, run_id="t", ledger_rows=rows, bootstrap_iterations=200)
+
+    assert not (result.control.rate == 0 and result.treatment.rate == 0), (
+        "both arms recovered nothing — that is a pipeline failure wearing the "
+        "clothes of a null result"
+    )

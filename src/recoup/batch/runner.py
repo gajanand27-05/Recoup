@@ -442,6 +442,32 @@ class BatchRunner:
             })
 
             if result.recovered:
+                # A SEPARATE `outcome.recovered` ROW, not just a flag inside the
+                # action payload. `replay()` reads recovery only from this event
+                # type; a `recovered: true` inside an `action.executed` payload is
+                # invisible to it.
+                #
+                # This was written the wrong way first and the defect is worth
+                # stating: 247 rows carried recovered=true and replay reported 0
+                # subscriptions recovered, so BOTH arms would have shown a 0%
+                # recovery rate and the lift would have come out exactly 0.00 pp
+                # with a tight interval. A clean-looking null result, not an
+                # error — the INC-005 shape, a consumer whose producer is not
+                # what it appears.
+                self._append({
+                    "run_id": self.run_id,
+                    "ts": to_iso_z(now),
+                    "event_type": "outcome.recovered",
+                    "subscription_id": scenario.subscription_id,
+                    "customer_id": scenario.customer_id,
+                    "arm": arm,
+                    "transport": self.transport.name,
+                    "payload": {
+                        "amount_paise": scenario.amount_paise,
+                        "reference_id": ref,
+                        "attempt_no": action.attempt_no,
+                    },
+                })
                 state.recovered_paise = scenario.amount_paise
                 counts["recovered"] = 1
                 counts["recovered_paise"] = scenario.amount_paise
