@@ -264,3 +264,77 @@ Required in the Task 22 report, per arm:
 such rather than as a lift figure. That is INC-007 in a new place: an arm that silently stopped
 being itself. The small-N dry pass asserts a non-trivial model-decided fraction *before* the
 batch is spent.
+
+---
+
+# Addendum 3 — what each lift outcome will mean
+
+## Written BEFORE the number existed
+
+Committed and pushed on **2026-09-02** while the N=2,000 batch stood at **12 of 2,000
+subscriptions**, with no summary file written and no figure computed. Unlike
+[Addendum 2](#addendum-2), this one is genuinely prospective, and the git history is the
+evidence: the commit adding this section precedes the commit recording any result.
+
+The point of fixing this now is that **all three outcomes are already acceptable**. Writing
+the interpretation after seeing which one occurred would leave no way to tell a principled
+reading from a convenient one.
+
+## The three outcomes, decided in advance
+
+### 1. CI excludes zero, treatment higher
+
+The claim is **the measured lift with its interval**, and it travels with the reply-eval
+accuracy and *that* interval alongside it. A lift figure quoted without the accuracy of the
+component that produced the decisions is a claim about a system whose main moving part is
+unmeasured.
+
+### 2. CI excludes zero, CONTROL higher
+
+**Reported as the result.** Not re-run, not re-seeded, not explained away.
+
+The control arm was deliberately strengthened before any lift number existed (Task 18,
+A-021): the schedule was front-loaded after measuring it against the frozen curve, it stops
+when the customer pays, and it uses the full five attempts `STOP-001` permits. A competent
+manual process beating an LLM agent is **a finding about this problem**, and a useful one —
+it says the decisioning is not where the value is.
+
+The temptation here is obvious and is refused in advance.
+
+### 3. CI includes zero
+
+Reported as **no detected difference at this N**, with the MDE stated: at N = 2,000 the
+design detects about **6.23 pp**, so an effect smaller than that is not distinguishable from
+noise by this experiment.
+
+Specifically **not** reported as "trending positive", "directionally favourable", or any
+phrase that treats a point estimate inside a zero-spanning interval as evidence of direction.
+And **not** re-run at larger N to chase significance — that is optional stopping with extra
+steps.
+
+## The bias direction applies to all three
+
+From Addendum 2, fixed before this batch: **schema violations pull measured lift toward
+null**, because a violation drives a `DETERMINISTIC`-labelled fallback that behaves like a
+control action.
+
+So the asymmetry is:
+
+- A **small or null** lift **may** cite violations as part of the reading.
+- A **large positive** lift may **not** — violations cannot inflate what they can only
+  suppress.
+
+The per-arm violation and fallback rates are reported either way.
+
+## The stopping rule
+
+**This batch is the run.** There is no re-run for a better number.
+
+A re-run is permitted **only** for a defect found in the machinery — and any such re-run is
+logged as an `INCIDENTS.md` entry with **both** figures reported, the discarded one and the
+replacement, so a reader can see what changed and judge whether the reason was real.
+
+This has already happened twice and both are on the record: the batch was killed at 12
+minutes for the order-dependent RNG, and at 821/2,000 for INC-009. Neither produced a lift
+figure, so neither is a discarded number — but the rule is written down now, before one
+exists to be tempted by.
