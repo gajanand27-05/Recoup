@@ -186,3 +186,81 @@ Stated here rather than left to be found. The full list is in [`README.md`](READ
 - **10 of 17 frozen simulator parameters are `ASSUMPTION`.**
 - **The outcome oracle is a simulator** for the measured batch. Real transport is exercised
   separately and never pooled with it.
+
+---
+
+# Addendum 2 — the reply-understanding eval, and how it feeds the lift claim
+
+## ⚠️ This addendum was written AFTER the eval had returned
+
+**Stated plainly rather than implied otherwise.** The accuracy figures in
+[`EVAL_RESULTS.md`](EVAL_RESULTS.md) existed before this section was written on **2026-09-02**.
+That makes everything below **weaker evidence than the pre-registration in the body of this
+file**, which was committed and pushed before any batch ran.
+
+What that costs, precisely: the decision rules below cannot be checked against the possibility
+that they were chosen once the number was known. They are recorded anyway, because rules
+written down are still better than rules held in someone's head — and because the rules that
+matter here govern **Task 22, which has not run**, so for that run they *are* prospective.
+
+Do not cite this addendum as a pre-registration of the Task 19 accuracy figures. It is not one.
+
+## Decision rules for the eval result
+
+Written as rules rather than as a description of what happened, so they bind the next run too.
+
+- **At or above the 85% intent bar** → proceed to Task 22.
+- **Below the bar** → the number is **reported as measured** and the run **still proceeds**.
+  The lift figure then carries the measured accuracy alongside it wherever it appears.
+  **No model switch, no re-prompting, no re-running to chase a better figure.** A weaker
+  instrument producing a worse number is a result. Switching models after seeing a bar missed
+  is optional stopping with an extra step.
+- **Either way, the confidence interval travels with the point estimate.** The measured intent
+  accuracy is 94.2% with a 95% CI of **[84.4%, 98.0%]** — a lower bound *below* the 85% bar.
+  "Clears the bar" is true of the point estimate and not of the interval, and both must be
+  said.
+
+## Schema violations have a KNOWN DIRECTION, and it is conservative
+
+Recorded **before** Task 22 has run, which is what makes this half prospective.
+
+On Ollama the schema is requested and not enforced (A-024). When a response fails validation,
+the planner does not retry and does not guess — it produces a **`DETERMINISTIC`-labelled
+fallback action**. That fallback is a fixed template on a fixed schedule, which is
+**behaviourally close to what the control arm does**.
+
+So a schema violation makes a treatment subscription behave more like a control subscription.
+The consequence for the headline number:
+
+> **Schema violations pull measured lift TOWARD NULL.**
+
+This is not merely a property of the instrument. It is a **known conservative bias on the
+primary claim**: whatever lift is measured, the true lift of a fully-functioning agent would be
+at least that large, *to the extent that violations occurred*. That direction is fixed in
+advance so it cannot be reinterpreted after the fact — if the observed lift is small, "some of
+that is schema violations" is a legitimate reading; if the observed lift is large, violations
+cannot be invoked to inflate it further.
+
+**This sentence must appear next to the lift figure in `README.md`.**
+
+## Violation and fallback rates are reported PER ARM, never pooled
+
+A fallback rate that differs between arms is **a confound, not a footnote**. The control arm
+does not call a model at all, so its fallback rate is structurally zero; the treatment arm's
+is whatever the model produced. Reporting one pooled rate would hide the only number that
+matters — how often the treatment arm stopped being the treatment.
+
+Required in the Task 22 report, per arm:
+
+| | control | treatment |
+|---|---|---|
+| subscriptions | | |
+| actions proposed | | |
+| **schema violations** | (n/a — no model) | |
+| **`DETERMINISTIC` fallback rate** | (n/a — no model) | |
+| actions vetoed by policy | | |
+
+**A treatment-arm fallback rate at or near 100% invalidates the run**, and is to be reported as
+such rather than as a lift figure. That is INC-007 in a new place: an arm that silently stopped
+being itself. The small-N dry pass asserts a non-trivial model-decided fraction *before* the
+batch is spent.
