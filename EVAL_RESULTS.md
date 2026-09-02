@@ -106,8 +106,16 @@ This section exists so that its absence is stated rather than inferred from a mi
 
 Both arms ran identical policy. If the harness manufactured lift, it would appear here.
 
-**Scope, which must travel with the result:** a pass rules out harness bias larger than about
-**6.23 percentage points**. It does **not** establish an unbiased harness.
+**The A/A test passed** — and the next sentence is not optional. **Scope, which must travel
+with the result:** a pass rules out harness bias larger than about **6.23 percentage points**.
+It does **not** establish an unbiased harness. An effect smaller than 6.23 pp could be sitting
+in the harness and this test would not see it.
+
+*(Stated as a verdict rather than left to be inferred from p = 0.8932. Until 2026-09-02 this
+section gave the numbers and never said "passed", so the only document stating the result was
+`VIDEO.md` — which is local-only and ships to nobody. The guard that keeps this sentence
+attached to its scope was therefore protecting nothing a judge would read, which
+`test_at_least_one_document_actually_states_each_claim` caught by failing in a clone.)*
 
 Run **once**. The result is pinned in `tests/test_aa.py` and is not re-run —
 re-running until a p-value pleases is optional stopping.
