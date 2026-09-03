@@ -26,6 +26,15 @@ runs/
 *.db
 *.sqlite3
 
+# ...EXCEPT run provenance. A figure has to name the commit that produced it, and
+# provenance that does not ship is not provenance -- a judge would see the number
+# and never the pinning. These files are small, contain no run data, and are the
+# only thing standing between "the lift is X" and "the lift is X, made by THIS
+# code, reproducible under HEAD or not". See CLAUDE.md section 4 and INC-011.
+!runs/
+runs/*
+!runs/*.provenance.json
+
 # ---------------------------------------------------------------------------
 # Python
 # ---------------------------------------------------------------------------

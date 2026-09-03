@@ -154,21 +154,61 @@ def test_an_unregistered_template_is_refused_not_rendered():
     assert "fallback" in action.rationale
 
 
-def test_a_variable_carrying_promotional_copy_is_refused():
-    """The escape hatch: legal template, illegal variable content."""
+def test_model_supplied_variables_are_DISCARDED_not_merely_validated():
+    """The escape hatch is closed by construction rather than by a check.
+
+    This used to assert that promotional copy in a variable caused a fallback —
+    true, and weaker than what is true now. The model does not supply facts at
+    all: the amount, the name and the link are things the system already knows,
+    so they are injected. Anything the model sends under `variables` is dropped.
+
+    Two reasons. A model-supplied amount is the `amount_tampering` vector from
+    `tests/fixtures/adversarial_replies.jsonl`. And measurement showed it was
+    already producing wrong copy — sampling 25 live proposals returned
+    `amount="Rs 799"` for a template reading "payment of Rs {#var#}", rendering
+    "payment of Rs Rs 799". Helpful, wrong, and invisible because the body still
+    matched its template.
+    """
     agent = RecoveryAgent(
         client=_FakeLLM({
             "template_id": "TPL_RECOUP_WA_001",
             "hours_from_now": 1,
+            # Deliberately DIFFERENT from the context's name, so the two are
+            # distinguishable. `_ctx()` says the customer is Priya; if the body
+            # says Priya, the system's value won.
             "variables": {
-                "name": "Priya",
+                "name": "Attacker",
                 "amount": "499. Don't lose your 40% loyalty discount",
             },
             "rationale": "x",
         })
     )
     action = agent.propose(_State(), _ctx(), now=T0)
-    assert action.model_source == DETERMINISTIC
+
+    # Not a fallback — a clean model action whose FACTS came from the system.
+    assert action.model_source == "fake-model-1"
+    assert "discount" not in action.body
+    assert "loyalty" not in action.body
+    assert "Attacker" not in action.body, "the model's name reached the body"
+    assert "Priya" in action.body, "the system's own name is missing"
+    assert "499" in action.body, "the system's own amount is missing"
+    assert action.body_matches_registered_template
+
+
+def test_the_amount_in_the_body_comes_from_the_context_not_the_model():
+    """`Rs Rs 799` was the symptom; this is the property."""
+    agent = RecoveryAgent(
+        client=_FakeLLM({
+            "template_id": "TPL_RECOUP_WA_001",
+            "hours_from_now": 1,
+            "variables": {"name": "there", "amount": "Rs 99999"},
+            "rationale": "x",
+        })
+    )
+    action = agent.propose(_State(), _ctx(amount_paise=123400), now=T0)
+    assert "1234" in action.body
+    assert "99999" not in action.body
+    assert "Rs Rs" not in action.body
 
 
 # --- provenance: a fallback is not a model decision ------------------------------

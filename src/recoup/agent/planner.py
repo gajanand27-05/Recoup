@@ -32,7 +32,7 @@ from datetime import datetime, timedelta
 from recoup.agent.llm import DETERMINISTIC, LLMTransport
 from recoup.agent.prompts import PLANNER_SYSTEM, REPLAN_SYSTEM
 from recoup.models import Action
-from recoup.render.templates import TemplateError, render
+from recoup.render.templates import TEMPLATES, TemplateError, render
 
 # The templates the planner may choose between. A subset of the registry: the
 # control arm's TPL_BASELINE_001 is deliberately NOT offered, so the treatment
@@ -189,8 +189,32 @@ class RecoveryAgent:
                 attempt_no, context, now, f"template {template_id!r} was not offered"
             )
 
-        variables = dict(raw.get("variables") or {})
-        variables.setdefault("link", "{link}")
+        # THE MODEL DOES NOT SUPPLY FACTS. It chooses a template, a channel and a
+        # delay; the amount, the customer's name and the link are things the
+        # system already knows, and they are injected here rather than accepted.
+        #
+        # Two reasons, and the second was found by measurement.
+        #
+        # 1. A model-supplied amount is an amount-tampering vector — it is in
+        #    `tests/fixtures/adversarial_replies.jsonl` as exactly that. A model
+        #    that can state the amount can state the wrong one.
+        #
+        # 2. It was already producing wrong copy. Sampling 25 proposals showed
+        #    the model returning `amount="Rs 799"` for a template that already
+        #    reads "payment of Rs {#var#}", rendering
+        #    "payment of Rs Rs 799". Helpful, and wrong, and invisible because
+        #    the body still matched its template.
+        #
+        # Anything else the model sends in `variables` is DISCARDED rather than
+        # merged: a slot the system does not own is a slot the model can fill.
+        variables = {
+            "name": str(context.get("customer_name", "there")),
+            "amount": str(context.get("amount_paise", 0) // 100),
+            "link": "{link}",
+        }
+        template = TEMPLATES.get(template_id)
+        if template is not None:
+            variables = {k: v for k, v in variables.items() if k in template.variables}
         try:
             rendered = render(template_id, variables)
         except TemplateError as exc:

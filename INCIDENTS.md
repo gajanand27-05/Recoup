@@ -769,3 +769,82 @@ A deny-list encodes the attacks you thought of. This one encoded "looks like pro
 payloads simply were not prose-shaped — they were commands, which are shorter and rarely end
 in a full stop. The allow-list encodes what the slot is *for*, which is a much smaller thing
 to get right and does not need updating when someone invents a new phrasing.
+
+---
+
+## INC-011 — The batch is running code that is no longer HEAD, and its messages say "Rs Rs 799"
+
+**2026-09-03, found by asking which commit the running process had loaded.**
+
+### The pinning
+
+The N=2,000 batch process was created at **21:12:46**. `f5d5288` was committed at **21:12:36**;
+the next commit, `63d9ace`, landed at **21:14:39** — after the process was already running.
+**A long-running process is pinned to the code it loaded.** This run is `f5d5288`.
+
+Four commits landed during the run. Only one touches the run's code path: **`d2d5301`**, which
+tightened `render()` from a deny-list to a per-variable allow-list after INC-010.
+
+### Is the figure reproducible under HEAD? No.
+
+Measured rather than assumed, because the ledger does not store variable values — 25 live
+proposals were sampled from the same model with the same prompts:
+
+| | |
+|---|---|
+| accepted by **both** renderers | 4 |
+| accepted by **`f5d5288` only** | **21** |
+| rejected by both | 0 |
+
+Under HEAD roughly **84%** of this run's proposals would have fallen back, which exceeds
+`MAX_TREATMENT_FALLBACK_RATE` and would have **invalidated the run**.
+
+What is *not* affected: `body_matches()` does not apply the allow-list — it calls
+`_variable_problem()` with no `kind` — so every ledger row's `body_matches_registered_template`
+flag remains correct under HEAD, and DLT-008 compliance is unchanged. The change can only turn
+*model-decided* into *fallback*; it cannot alter an accepted body's bytes.
+
+### The defect the sampling exposed
+
+The model returns `amount="Rs 799"` for a template reading `"payment of Rs {#var#}"`. Every
+treatment message in this run renders as:
+
+```
+Hi there, your subscription payment of Rs Rs 799 could not be processed. ...
+```
+
+**Invisible, because the body still matched its template.** The slot accepted anything short
+and unpunctuated, so `body_matches_registered_template` was `True` and DLT-008 passed. A
+malformed message that is perfectly compliant.
+
+**Effect on the lift figure: none.** `SimTransport.execute()` computes recovery from
+`day_offset`, `channel`, `attempt_no` and `is_hard_decline`; it does not read the body,
+verified by inspecting the source. The number is unaffected.
+
+**Effect on the claim: stated.** The run measures a system whose outbound copy was malformed,
+using a simulator blind to message quality. A real customer receiving "Rs Rs 799" would
+plausibly respond worse, so on this axis the simulated rate is generous to the treatment arm.
+
+### The root cause was not formatting
+
+The planner let the **model supply facts**. The amount is something the system already knows,
+and a model that can state it can state the wrong one — which is the `amount_tampering` entry
+in `tests/fixtures/adversarial_replies.jsonl`, written the day before by the same hand that
+left the hole open.
+
+Fixed in HEAD: `name`, `amount` and `link` are injected from context, and anything the model
+sends under `variables` is **discarded** rather than validated. The attack is now impossible
+rather than refused, and the test says so.
+
+### Not restarted
+
+Restarting costs three hours that the 5 Sep deadline does not have, and the pinning is the
+honest answer either way. `runs/batch-2000.provenance.json` was written **mid-run, before the
+figure existed**, so the pinning is a record rather than a reconstruction.
+
+**Lesson kept, and now in `CLAUDE.md` §4**
+
+Committing during a long run forks the artifact from the repository. The run does not know,
+the repository does not know, and the resulting figure quietly belongs to neither. Any run
+producing a reported number records its own commit; mid-run commits touching its code path get
+an equivalence check rather than an assumption.
