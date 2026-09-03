@@ -2,41 +2,31 @@
   "run_id": "batch-2000",
   "n": 2000,
   "seed": 20260902,
-  "started_at": "2026-09-02T21:12:46+05:30",
-
-  "code_commit": "f5d5288b699ad5186e6ea37997cd3bc33e041e76",
-  "code_commit_short": "f5d5288",
-  "code_commit_subject": "fix(batch): emit the event replay reads, or the lift is structurally zero",
-  "code_commit_time": "2026-09-02T21:12:36+05:30",
-
-  "how_determined": "The batch process (PID 7952) was created at 21:12:46. f5d5288 was committed at 21:12:36, ten seconds earlier; the next commit, 63d9ace, landed at 21:14:39, after the process had started. A long-running process is pinned to the code it loaded, so this run is f5d5288 regardless of what HEAD later became.",
-
-  "reproducible_under_head": false,
+  "started_at": "2026-09-03T06:43+05:30",
+  "code_commit": "487fc455a52a6e046fd9fe448e776c8dfb4f2688",
+  "code_commit_short": "487fc45",
+  "code_commit_subject": "fix(llm): a usage limit is not a concurrency limit, and restart the batch",
+  "code_commit_time": "2026-09-03T06:42:42+05:30",
+  "how_determined": "Written immediately before launching the run, from the commit that was HEAD at launch. The previous attempt (f5d5288) died at 1326/2000 on an Ollama account usage limit and was restarted rather than resumed -- see A-025 and INC-011.",
+  "reproducible_under_head": true,
   "equivalence_check": {
-    "commits_after_start": ["63d9ace", "e98b1ab", "06cedd7", "d2d5301"],
-    "commits_touching_the_run_code_path": ["d2d5301"],
-    "what_changed": "d2d5301 tightened render() from a deny-list (too long / multi-line / ends a sentence) to an allow-list of per-variable kinds, after INC-010 showed 8 of 22 injection payloads riding through a template slot.",
-    "unaffected": "body_matches() does NOT apply the allow-list -- it calls _variable_problem() with no kind -- so every ledger row's body_matches_registered_template flag is still correct under HEAD. DLT-008 compliance is unchanged.",
-    "affected": "render() is stricter, so a proposal accepted under f5d5288 may be rejected under HEAD. The change can only convert model-decided into fallback; it cannot alter an accepted body's bytes.",
-    "measured": "25 live proposals sampled from the same model with the same prompts: 4 accepted by both renderers, 21 accepted by f5d5288 only, 0 rejected by both.",
-    "verdict": "NOT EQUIVALENT. Under HEAD's renderer roughly 84% of this run's proposals would have fallen back, which exceeds MAX_TREATMENT_FALLBACK_RATE and would have INVALIDATED the run. The figure this batch produces belongs to f5d5288 and to no other commit."
+    "status": "n/a for this run -- it started at HEAD",
+    "rule": "If a commit lands while this run is in flight and touches its code path, it gets an output-equivalence check and this field records the result. The SUPERSEDED attempt needed one and failed it; see `supersedes`."
   },
-
   "known_defect_in_this_run": {
-    "id": "INC-011",
-    "what": "The model supplied amount=\"Rs 799\" for a template reading \"payment of Rs {#var#}\", so every treatment message in this run renders as \"payment of Rs Rs 799\".",
-    "why_it_was_invisible": "The body still matched its registered template -- the slot accepted anything short and unpunctuated -- so body_matches_registered_template was True and DLT-008 passed.",
-    "effect_on_the_lift_figure": "NONE. SimTransport.execute() computes recovery from day_offset, channel, attempt_no and is_hard_decline. It does not read the body. Verified by inspecting the source.",
-    "effect_on_the_claim": "The run measures a system whose outbound copy was malformed, using a simulator blind to message quality. A real customer receiving \"Rs Rs 799\" would plausibly respond worse, so the simulated recovery rate is, if anything, generous to the treatment arm on this axis.",
-    "fixed_in_head": "The planner no longer accepts facts from the model. The amount, name and link are injected from context; anything the model sends under `variables` is discarded."
+    "none_known": "The INC-011 malformed-copy defect is fixed in this commit: the planner injects name, amount and link from context and discards model-supplied variables."
   },
-
   "transport": "sim",
   "model": {
     "id": "gpt-oss:120b",
     "digest": "d98fe6ba01e6",
     "confirmation": "CONFIRMED_BY_REGISTRY"
   },
-
-  "note": "Written mid-run, before the figure existed, so the pinning is not a reconstruction. See CLAUDE.md section 4 for the standing rule."
+  "note": "Written immediately BEFORE the run was launched, so the pinning is a record rather than a reconstruction. See CLAUDE.md section 4 for the standing rule that a long-running process is pinned to the code it loaded.",
+  "supersedes": {
+    "code_commit_short": "f5d5288",
+    "outcome": "died at 1326/2000 on a provider usage limit; NO figure was produced from it",
+    "why_not_resumed": "resuming would have produced a two-commit run, half of it decided by a planner that took facts from the model and sent 'payment of Rs Rs 799' (INC-011)",
+    "equivalence_check_result": "NOT EQUIVALENT. 25 live proposals sampled from the same model: 4 accepted by both renderers, 21 accepted by f5d5288 only. Under the newer renderer ~84% would have fallen back, exceeding MAX_TREATMENT_FALLBACK_RATE and invalidating the run."
+  }
 }

@@ -133,7 +133,32 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="EVENT",
         help="move an observed payload into committed evidence (a deliberate act)",
     )
+    p_demo = sub.add_parser(
+        "demo-failure",
+        help="stage a promotional-drift veto and its replan (D-023, A-005)",
+    )
+    p_demo.add_argument("--run-id", default="demo")
     return parser
+
+
+def cmd_demo_failure(args) -> int:
+    """Run the staged veto and narrate it from its own output.
+
+    The narration is generated from the result rather than written alongside it,
+    so the commentary cannot contradict what the run did.
+    """
+    from recoup.demo import narrate, run_failure_demo
+    from recoup.ledger.store import Ledger
+
+    ledger = Ledger(args.db)
+    result = run_failure_demo(ledger, run_id=args.run_id)
+    print(narrate(result))
+    print()
+    print(f"rules that fired: {', '.join(result['all_denials'])}")
+    print(f"ledger rows written to {args.db} under run_id {args.run_id!r}")
+    # Non-zero would read as failure. The veto IS the success condition here,
+    # so the exit code tracks whether the demo did what it exists to do.
+    return 0 if result["vetoed"] and result["replanned_allowed"] else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -143,6 +168,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_verify_ledger(args)
     if args.command == "captures":
         return cmd_captures(args)
+    if args.command == "demo-failure":
+        return cmd_demo_failure(args)
     parser.error(f"unknown command {args.command}")
     return 2
 
