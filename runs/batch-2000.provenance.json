@@ -22,11 +22,51 @@
     "digest": "d98fe6ba01e6",
     "confirmation": "CONFIRMED_BY_REGISTRY"
   },
-  "note": "Written immediately BEFORE the run was launched, so the pinning is a record rather than a reconstruction. See CLAUDE.md section 4 for the standing rule that a long-running process is pinned to the code it loaded.",
+  "note": "A run's provenance is the SET of code versions and runtime parameters it executed under, not the one it started with. Every resume, restart and parameter change appends to that set. See CLAUDE.md section 4.",
   "supersedes": {
     "code_commit_short": "f5d5288",
     "outcome": "died at 1326/2000 on a provider usage limit; NO figure was produced from it",
     "why_not_resumed": "resuming would have produced a two-commit run, half of it decided by a planner that took facts from the model and sent 'payment of Rs Rs 799' (INC-011)",
     "equivalence_check_result": "NOT EQUIVALENT. 25 live proposals sampled from the same model: 4 accepted by both renderers, 21 accepted by f5d5288 only. Under the newer renderer ~84% would have fallen back, exceeding MAX_TREATMENT_FALLBACK_RATE and invalidating the run."
+  },
+  "code_pins": [
+    {
+      "commit": "487fc455a52a6e046fd9fe448e776c8dfb4f2688",
+      "short": "487fc45",
+      "subscription_index_range": "1-1153",
+      "note": "initial launch 06:43; died at 1153/2000 on an Ollama account usage limit"
+    },
+    {
+      "commit": "7dbe2c0",
+      "short": "7dbe2c0",
+      "subscription_index_range": "1154-2000",
+      "note": "resumed 09:47 after the quota reset"
+    }
+  ],
+  "concurrency_schedule": [
+    {
+      "value": 4,
+      "applied_to": "the SUPERSEDED f5d5288 attempt only; no surviving data"
+    },
+    {
+      "value": 3,
+      "subscription_index_range": "1-1153"
+    },
+    {
+      "value": 2,
+      "subscription_index_range": "1154-2000",
+      "why": "lower burn rate to reach further before the next quota wall"
+    }
+  ],
+  "equivalence_demonstrated": {
+    "claim": "The two code pins and the three concurrency settings produce IDENTICAL batch outcomes, so the split does not fork the figure.",
+    "method": "Ran N=40 seed=4242 on the deterministic path under each condition and compared a fingerprint of every ledger row: subscription_id|arm|event_type|attempt_no|recovered|channel.",
+    "results": {
+      "concurrency 1 vs 2": "IDENTICAL (176 rows)",
+      "concurrency 1 vs 4": "IDENTICAL (176 rows)",
+      "pin 487fc45 vs 7dbe2c0 (git worktree)": "IDENTICAL (176 rows)"
+    },
+    "why_reachability_was_not_enough": "The three files changed between the pins -- cli.py, demo.py, eval/sensitivity.py -- are none of the 18 modules in the runner's transitive import closure. That is an argument about code REACHABILITY, not a demonstration of output equivalence, and this build has a rule about the difference (INC-011). So it was run under both pins and diffed.",
+    "why_concurrency_invariance_holds": "Draws are keyed on (seed, subscription_id, attempt_no, day_offset) rather than taken from a shared RNG whose position depends on interleaving. That keying was introduced precisely so this is demonstrable; it is now pinned by tests/test_batch_runner.py::test_concurrency_does_not_change_the_outcome, which compares OUTCOMES and not only reference_ids, and which fails on all three concurrency values when the shared RNG is restored."
   }
 }

@@ -298,13 +298,61 @@ def test_the_chain_verifies_after_a_concurrent_run(tmp_path):
     assert result.ok, getattr(result, "error", result)
 
 
-def test_concurrency_produces_the_same_rows_as_sequential(tmp_path, tmp_path_factory):
-    """If ordering changed the outcome, the run would not be reproducible."""
+def _fingerprint(db_path) -> list[str]:
+    """Every row's identity AND OUTCOME, sorted.
+
+    Comparing `reference_id`s alone is not enough: two runs can agree on which
+    actions were taken and disagree on who recovered, which is exactly the defect
+    the identity-keyed draw was introduced to fix. The recovery flag has to be in
+    the comparison or the test passes on the half that could not differ.
+    """
+    conn = sqlite3.connect(str(db_path))
+    try:
+        rows = []
+        for sub, arm, kind, payload in conn.execute(
+            "SELECT subscription_id, arm, event_type, payload FROM ledger"
+        ):
+            p = json.loads(payload)
+            rows.append(
+                f"{sub}|{arm}|{kind}|{p.get('attempt_no')}|{p.get('recovered')}"
+                f"|{p.get('channel')}|{p.get('amount_paise')}"
+            )
+        return sorted(rows)
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize("concurrency", [2, 4, 6])
+def test_concurrency_does_not_change_the_outcome(tmp_path_factory, concurrency):
+    """The run's provenance includes the concurrency it executed under, and this
+    batch executed under three different values (4, then 3, then 2) across two
+    resumes. That is only harmless if outcomes are concurrency-invariant.
+
+    They are, BY CONSTRUCTION: draws are keyed on
+    (seed, subscription_id, attempt_no, day_offset) rather than drawn from a
+    shared RNG whose position depends on interleaving. That keying exists
+    precisely so this is demonstrable — so it is demonstrated rather than cited.
+    """
     seq_dir = tmp_path_factory.mktemp("seq")
-    con_dir = tmp_path_factory.mktemp("con")
-    _runner(seq_dir, concurrency=1, seed=11, run_id="s").run(16, progress_every=0)
-    _runner(con_dir, concurrency=4, seed=11, run_id="s").run(16, progress_every=0)
-    assert sorted(_refs(seq_dir / "b.db")) == sorted(_refs(con_dir / "b.db"))
+    con_dir = tmp_path_factory.mktemp(f"con{concurrency}")
+    _runner(seq_dir, concurrency=1, seed=11, run_id="s").run(24, progress_every=0)
+    _runner(con_dir, concurrency=concurrency, seed=11, run_id="s").run(
+        24, progress_every=0
+    )
+
+    sequential = _fingerprint(seq_dir / "b.db")
+    concurrent = _fingerprint(con_dir / "b.db")
+    assert sequential == concurrent, (
+        f"concurrency {concurrency} produced different outcomes from sequential. "
+        f"The run spanned three concurrency settings, so this would make the "
+        f"figure unreproducible.\n"
+        f"  only sequential: {sorted(set(sequential) - set(concurrent))[:3]}\n"
+        f"  only concurrent: {sorted(set(concurrent) - set(sequential))[:3]}"
+    )
+    assert any("|True|" in row for row in sequential), (
+        "no recoveries in this cohort, so the outcome half of the fingerprint is "
+        "constant and the comparison proves less than it appears"
+    )
 
 
 # --- the horizon --------------------------------------------------------------
