@@ -70,8 +70,21 @@ def _documents():
 _EMPHASIS = str.maketrans({"*": " ", "_": " ", "`": " "})
 
 
+#: Blockquote markers at line starts, blanked the same way and for the same
+#: reason. A sentence wrapped inside a `>` quote reads as
+#: `"not the same as\n> there being none"`, and `\s+` does not match `>` — so a
+#: clause that IS adjacent looks absent. Found on VIDEO.md, whose script lines
+#: are all blockquoted.
+#:
+#: Only at line starts: a bare `>` mid-line is a comparison or an arrow, and
+#: `->` is a disavowal marker that must survive.
+_BLOCKQUOTE = re.compile(r"^([ \t]*)>", re.MULTILINE)
+
+
 def _read(name: str) -> str:
-    return (REPO / name).read_text(encoding="utf-8").translate(_EMPHASIS)
+    text = (REPO / name).read_text(encoding="utf-8").translate(_EMPHASIS)
+    # Length-preserving, so reported line numbers still point at the real line.
+    return _BLOCKQUOTE.sub(lambda m: m.group(1) + " ", text)
 
 
 def _raw(name: str) -> str:
@@ -397,7 +410,10 @@ _NULL_CLAIM = re.compile(
     r"did\s+not\s+detect\s+a\s+difference|no\s+detected\s+difference", re.IGNORECASE
 )
 _NON_EQUIVALENCE = re.compile(
-    r"not\s+the\s+same\s+as\s+there\s+being\s+no\s+difference"
+    # "there being none" is the same clause as "there being no difference" -- a
+    # spoken script naturally elides the noun. Matching only the long form failed
+    # VIDEO.md for saying the right thing in fewer words.
+    r"not\s+the\s+same\s+as\s+there\s+being\s+(?:no\s+difference|none)"
     r"|does\s+not\s+(?:rule\s+out|establish)",
     re.IGNORECASE,
 )

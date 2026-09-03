@@ -91,11 +91,15 @@ reproducible off Windows).
 
 ## Results
 
+**Two findings. The second matters more than the first.**
+
 Full detail, including every miss and every not-run item, is in
 [`EVAL_RESULTS.md`](EVAL_RESULTS.md). Nothing here is projected or carried over from an earlier
 configuration.
 
-### Recovery lift — the headline
+---
+
+## Finding 1 — the agent did not beat the control
 
 **The experiment did not detect a difference.**
 
@@ -114,7 +118,7 @@ the MDE at the stated power. It does **not** rule out a real effect smaller than
 does **not** establish that the two arms are equivalent — a null result and a demonstration of
 equivalence are different claims, and only the first was run.
 
-#### The control was made strong on purpose, before any number existed
+### The control was made strong on purpose, before any number existed
 
 A null against a strawman is worthless. A null against a competent process is a finding, and
 this distinction is the reason the result is worth reporting at all.
@@ -129,7 +133,7 @@ So the finding is: **an LLM agent choosing template, channel and timing did not 
 well-tuned fixed schedule on this cohort.** That is a useful thing to know, and it says the
 decisioning is not where the value is.
 
-#### The ordering is the evidence
+### The ordering is the evidence
 
 Each of these was fixed *before* the thing it constrains, and the git history is what makes
 that checkable rather than assertable:
@@ -145,7 +149,7 @@ Because the violation rate is zero, the toward-null bias is **nil, not small** �
 excuse that could have argued the true effect is larger than measured is unavailable, and it
 was made unavailable in advance rather than after seeing the number.
 
-#### One sign flip, reported as pre-registered
+### One sign flip, reported as pre-registered
 
 `attempt_decay_compounding` at the low end of its declared range takes the lift to **−0.10 pp**.
 [`EXPERIMENT.md`](EXPERIMENT.md) pre-registers a sign flip as falsifying, so it is stated rather
@@ -160,13 +164,82 @@ reversal of a real effect. Both sentences are true; neither is reported without 
 fixed actions cannot reach scenario generation. Reporting them as swept-and-flat would be the
 most reassuring possible result in the emptiest possible place.
 
-#### Provenance
+### Provenance
 
 Pinned to **three commits** — `487fc45` (1–1153), `7dbe2c0` (1154–1354), `25ad9c4` (1355–2000)
 — across two resumes forced by a provider account quota and one network timeout, at three
 concurrency settings. The pins and settings were **demonstrated** output-equivalent, not
 argued: the batch was re-run under each and every ledger row compared identical. See
 `runs/batch-2000.provenance.json`.
+
+---
+
+## Finding 2 — the experiment could not have detected what it was testing
+
+**This is the more useful of the two findings, and it outranks the lift figure.**
+
+Computed over the frozen response curve, the difference between the most aggressive schedule
+`STOP-001` permits and the one the control uses is **1.53 pp**:
+
+| schedule | cumulative recovery |
+|---|---|
+| `(0,1,2,3,4)` | 0.3536 ← the most aggressive five attempts allow |
+| `(0,1,3,5,7)` | 0.3513 |
+| **`(0,2,4,7,10)`** | **0.3383** ← the control |
+| `(0,2,5,9,14)` | 0.3176 ← the original plan's schedule |
+| `(0,3,7,15,30)` | 0.2897 |
+
+**The minimum detectable effect is 6.23 pp. The largest difference any legitimate schedule
+change can produce is 1.53 pp — roughly a quarter of it.**
+
+So the experiment was **structurally incapable of detecting the intervention it was built to
+test**. A null was close to the *expected* outcome for any agent operating on schedule, channel
+or timing, whatever the agent did, because the frozen curve does not make those levers worth
+6 percentage points. Detecting a 1.53 pp effect at this power needs roughly **34,000
+subscriptions**, seventeen times the N that ran.
+
+### The ordering, which is not flattering
+
+The build's discipline is that sequence is evidence. Here the sequence is unflattering, and
+softening it would be exactly the compression this project spends its guards preventing:
+
+**This was computable from the frozen curve on Day 2.** `SCHEDULE_ALTERNATIVES` and their
+cumulative recoveries have been in `baseline/fixed.py` since Task 8 — the 1.53 pp gap is
+arithmetic over numbers that were already committed, and `mde_at_n()` has been able to return
+6.23 pp for just as long. Nothing compared the two.
+
+It was found on Day 6, **after** the harness, the control arm, the pre-registration, three
+restarts of the batch and 2,000 subscriptions of provider quota — and then only as a side
+effect of asking whether the A/A could detect anything at all.
+
+The power analysis fixed the MDE from a baseline rate and a target power. It never asked the
+other question: *what effect sizes can this intervention actually produce?* That question was
+available at every point and was not asked.
+
+### It was not acted on, deliberately
+
+A reader will wonder why the answer is not simply to re-run at 34,000. Because
+[`EXPERIMENT.md`](EXPERIMENT.md) Addendum 3 fixed the stopping rule at 12 of 2,000
+subscriptions, before any figure existed: **this batch is the run**, and re-running at a larger
+N after seeing a null is optional stopping however good the reason sounds. The power
+calculation above was done *after* the result and is reported as a finding, not used as grounds
+to go again.
+
+### What it means for the null
+
+It does not excuse the null, and it does not convert it into anything else. The agent still did
+not beat the control. What it says is that this experiment could not have distinguished a good
+agent from a bad one at this lever, so the null is weak evidence about the agent and strong
+evidence about the design.
+
+If the work continued, the next step is not a bigger N. It is an intervention with more room in
+it than schedule choice.
+
+---
+
+---
+
+## Supporting measurements
 
 ### Reply understanding — measured
 
@@ -207,21 +280,6 @@ larger than about **6.23 percentage points**. It does **not** establish an unbia
 It was shown capable of detecting something first — a known effect was injected and the
 pipeline reported it (+4.21 pp, p = 0.0451). A test that passes by finding nothing is worthless
 until it has been shown able to find something.
-
-### 🚨 The experiment is underpowered for the intervention it tested
-
-That detection check found something worse than it was looking for. Over the frozen curve, the
-gap between the most aggressive schedule `STOP-001` allows and the one the control uses is
-**1.53 pp**. The MDE is **6.23 pp**.
-
-**The largest difference any legitimate schedule change can produce is about a quarter of the
-smallest difference this experiment can reliably detect.** A null was therefore close to the
-expected outcome for any intervention working on schedule, channel or timing. Closing the gap
-would need roughly 34,000 subscriptions, or a lever somewhere other than the schedule.
-
-This does not excuse the null. It says the design was underpowered for its own intervention
-class — computable from the frozen curve since Task 8, and not checked until after the run
-(A-028).
 
 ### Not run, and declared
 
