@@ -338,3 +338,87 @@ def render_sweep(results: list[SweepResult]) -> list[str]:
             "exists to prevent, one level up. They are declared NOT SWEPT."
         )
     return lines
+
+
+def replay_actions_from_ledger(db_path: str, run_id: str, *, n: int, seed: int):
+    """Reconstruct the run's actions faithfully enough to reproduce its rates.
+
+    NOT an obvious function, and the first version was written ad hoc and was
+    wrong in a way that produced a confident wrong answer: it reported FIVE sign
+    flips. Two fields the curve needs are not in the ledger payload, and passing
+    defaults for them silently changes every recovery probability.
+
+    * `day_offset` — derived from each row's `ts` relative to that
+      subscription's first row. Passing 0 for all of them put every action on the
+      highest point of the curve.
+    * `is_hard_decline` — a property of the SCENARIO, not of the action, so it is
+      recovered by regenerating the cohort from `(n, seed)`. Passing False for
+      all of them removed the 0.60 hard-decline multiplier entirely and inflated
+      the control arm from 29.95% to 32.17%.
+
+    With both, the replay reproduces the control arm EXACTLY and the treatment
+    arm to within one subscription. `verify_replay_reproduces()` asserts that
+    rather than leaving it to a comment.
+    """
+    import json
+    import sqlite3
+    from datetime import datetime
+
+    from recoup.simulator.generator import generate_scenarios
+
+    hard = {s.subscription_id: s.is_hard_decline for s in generate_scenarios(n, seed=seed)}
+
+    conn = sqlite3.connect(db_path)
+    try:
+        rows = list(conn.execute(
+            "SELECT subscription_id, arm, ts, payload FROM ledger "
+            "WHERE run_id = ? AND event_type = 'action.executed' ORDER BY seq",
+            (run_id,),
+        ))
+    finally:
+        conn.close()
+
+    first: dict[str, object] = {}
+    for sub, _, ts, _ in rows:
+        moment = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        if sub not in first or moment < first[sub]:
+            first[sub] = moment
+
+    actions = []
+    for sub, arm, ts, payload in rows:
+        p = json.loads(payload)
+        moment = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        actions.append(ReplayAction(
+            subscription_id=sub,
+            arm=arm,
+            channel=p["channel"],
+            day_offset=(moment - first[sub]).days,
+            attempt_no=p["attempt_no"],
+            is_hard_decline=hard.get(sub, False),
+        ))
+    return actions
+
+
+def verify_replay_reproduces(
+    actions, *, seed: int, control_rate: float, treatment_rate: float,
+    tolerance: float = 0.005,
+) -> tuple[float, float]:
+    """Refuse to sweep over a replay that does not reproduce the run.
+
+    A sweep is a set of differences FROM a baseline. If the replay's baseline is
+    not the run's baseline, every difference is measured from the wrong place and
+    the verdicts are noise wearing a table. The first attempt reported five sign
+    flips for exactly this reason.
+    """
+    control, treatment = _recompute(actions, seed)
+    for name, got, want in (
+        ("control", control, control_rate), ("treatment", treatment, treatment_rate)
+    ):
+        if abs(got - want) > tolerance:
+            raise ValueError(
+                f"the replay does not reproduce the run: {name} arm came out "
+                f"{got:.4%} against the run's {want:.4%} (tolerance "
+                f"{tolerance:.2%}). Sweeping this would measure every difference "
+                f"from the wrong baseline. Check day_offset and is_hard_decline."
+            )
+    return control, treatment

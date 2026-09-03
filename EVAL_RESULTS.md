@@ -85,10 +85,95 @@ That is a property of this model on this task and should not be assumed to hold 
 
 ## Recovery lift — Task 22
 
-**NOT RUN.** The batch runner is not built. There is no lift figure, no confidence interval,
-and no cost-per-recovery number.
+**Run 2026-09-03 · N = 2,000 as pre-registered · seed 20260902 · `sim` transport ·
+`gpt-oss:120b`, digest `d98fe6ba01e6`, CONFIRMED_BY_REGISTRY.**
 
-This section exists so that its absence is stated rather than inferred from a missing heading.
+| arm | recovered | n | rate | 95% CI (Wilson) |
+|---|---|---|---|---|
+| control | 310 | 1,035 | **29.95%** | [27.24%, 32.81%] |
+| treatment | 303 | 965 | **31.40%** | [28.55%, 34.40%] |
+
+**Difference +1.45 pp · 95% CI [−2.59, +5.49] pp · p = 0.4830**
+
+### The result: no detected difference at this N
+
+**The interval spans zero.** This run does not distinguish the agent from the control.
+
+Reported as pre-registered in [`EXPERIMENT.md`](EXPERIMENT.md) Addendum 3, written at
+12/2,000 before any number existed. Outcome 3 says exactly this: *no detected difference at
+this N, with the MDE stated* — **not** "trending positive", and **not** re-run at larger N to
+chase significance.
+
+The MDE at N = 2,000 is **6.24 pp**. An effect of +1.45 pp is well inside the noise this design
+can resolve, so the honest statement is that the experiment did not detect a difference — not
+that there is none.
+
+### Why the usual excuse is unavailable
+
+Addendum 2 fixed in advance that schema violations pull measured lift **toward null**, because
+a violation drives a `DETERMINISTIC` fallback that behaves like a control action.
+
+**The fallback rate was 0.0%** — 3,637 model decisions, zero fallbacks. So that bias is **nil,
+not small**, and cannot be invoked to argue the true effect is larger. The counter was verified
+to still be counting before this figure existed (A-027): five forced schema violations each
+drive it to 100%.
+
+### Per arm
+
+| | control | treatment |
+|---|---|---|
+| subscriptions | 1,035 | 965 |
+| actions proposed | 4,353 | 6,579 |
+| actions sent | 4,353 | 3,637 |
+| vetoed by policy | 0 | 474 |
+| model-decided | 0 | 3,637 |
+| fallbacks | 0 | **0** |
+
+The treatment arm proposed more and sent less: 474 of its proposals were vetoed, almost all by
+`STOP-001`'s five-attempt cap. The control cannot be vetoed because its schedule never exceeds
+the cap by construction.
+
+### The sign was verified independently
+
+Recovery counts read straight off the ledger by a path importing neither `lift.py` nor
+`stats.py` agree: control 310/1,035, treatment 303/965, direction **+1**. Two implementations
+sharing no code would have to be inverted identically to agree wrongly.
+
+### Sensitivity: one sign flip, reported
+
+The sweep replays the run's own actions and varies the response curve at each end of every
+declared range.
+
+**`attempt_decay_compounding` = 0.0 flips the sign: +1.55 pp → −0.10 pp.**
+
+`EXPERIMENT.md` pre-registers a sign flip as falsifying, so it is reported rather than
+narrowed away. In context the flip is −0.10 pp against a measurement whose interval already
+spans zero, so it is consistent with the headline finding — no detected difference — rather
+than a reversal of a real effect. Both statements are true and both are here.
+
+`channel_multiplier_whatsapp`, `channel_multiplier_sms` and `hard_decline_multiplier` move the
+model and hold their direction at both endpoints. `decay_beyond_curve` and
+`attempt_decay_compounding` at its high endpoint are **UNWIRED** — in scope, and could not be
+shown to move anything.
+
+**`self_recovery_rate_soft` and `_hard` are NOT SWEPT**, and they are the two that matter most.
+They define `would_self_recover` and therefore the denominator of the whole lift claim, and a
+replay that holds actions fixed cannot reach scenario generation. Reporting them as
+swept-and-flat would be the reassuring-result-where-the-model-is-emptiest failure one level up.
+
+### Provenance
+
+The run spans **three code pins** — `487fc45` (1–1153), `7dbe2c0` (1154–1354), `25ad9c4`
+(1355–2000) — and three concurrency settings, across two resumes forced by a provider account
+quota and one network timeout. All recorded in `runs/batch-2000.provenance.json` with the
+subscription range each produced.
+
+The pins and concurrency settings were **demonstrated** output-equivalent, not argued: the same
+batch was run under each and every ledger row compared identical.
+
+### Completeness
+
+8,617 ledger rows, 2,000 subscriptions replayed, **0 rows attributable to no subscription**.
 
 ---
 

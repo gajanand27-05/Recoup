@@ -97,25 +97,37 @@ configuration.
 
 ### Recovery lift — the headline
 
-**NOT YET REPORTED.** The N=2,000 batch is the run that produces it. This heading exists so its
-absence is stated rather than inferred from a gap, and it is replaced by the measured figure —
-whatever direction that figure points — when the run completes.
+**Run 2026-09-03 · N = 2,000 as pre-registered · `sim` transport.**
 
-Three things will travel with it, and they are not optional garnish:
+| arm | recovered | n | rate |
+|---|---|---|---|
+| control | 310 | 1,035 | 29.95% |
+| treatment | 303 | 965 | 31.40% |
 
-**The MDE the run actually has.** The design is powered for **6.23 pp** at N=2,000. If the run
-finishes short — the provider's account quota has ended it twice — the report recomputes the
-MDE at the achieved N and prints both numbers. At N=1,153 that is 8.18 pp, a third worse than
-the design, and quoting an effect against a power the run does not have overstates what it can
-see.
+**Difference +1.45 pp · 95% CI [−2.59, +5.49] pp · p = 0.4830 · MDE 6.24 pp**
 
-**The direction of the known bias.** On this provider the JSON schema is *requested, not
-enforced* (A-024), so a malformed response drives a `DETERMINISTIC`-labelled fallback — a fixed
-template on a fixed schedule, which is behaviourally close to the control arm. Schema
-violations therefore pull measured lift **toward null**. Fixed in advance so it cannot be
-applied selectively: a small or null lift may cite them; a large positive lift may not.
+**The interval spans zero. This run does not distinguish the agent from the control.**
 
-**The accuracy of the component that made the decisions.** Below.
+That is the result, reported as pre-registered in [`EXPERIMENT.md`](EXPERIMENT.md) Addendum 3 —
+written at 12 of 2,000 subscriptions, before any number existed, precisely so this outcome
+could not be described afterwards as "trending positive". An effect of +1.45 pp is well inside
+what a 6.24 pp MDE can resolve. The experiment did not detect a difference; that is not the
+same as there being none.
+
+**The usual excuse is unavailable here.** Addendum 2 fixed in advance that schema violations
+pull measured lift toward null. The fallback rate was **0.0%** across 3,637 model decisions, so
+that bias is nil rather than small — and the counter was verified to still be counting *before*
+this figure existed (A-027).
+
+**One sign flip, reported.** `attempt_decay_compounding` at the low end of its declared range
+takes the lift to −0.10 pp. `EXPERIMENT.md` pre-registers a flip as falsifying, so it is stated
+rather than narrowed away — in context, a −0.10 pp swing against a measurement whose interval
+already spans zero is consistent with the headline finding rather than a reversal of a real one.
+
+**The figure is pinned to three commits**, not one: the run spans `487fc45`, `7dbe2c0` and
+`25ad9c4` across two resumes forced by a provider quota and one network timeout. The pins and
+the three concurrency settings were *demonstrated* output-equivalent — the batch was re-run
+under each and every ledger row compared identical. See `runs/batch-2000.provenance.json`.
 
 ### Reply understanding — measured
 
