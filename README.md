@@ -89,10 +89,92 @@ If a defect is found in the simulator after freezing, the tag is **not** moved �
 (INC-004: the hash was computed with a platform-dependent file ordering and was not
 reproducible off Windows).
 
+## Results
+
+Full detail, including every miss and every not-run item, is in
+[`EVAL_RESULTS.md`](EVAL_RESULTS.md). Nothing here is projected or carried over from an earlier
+configuration.
+
+### Recovery lift — the headline
+
+**NOT YET REPORTED.** The N=2,000 batch is the run that produces it. This heading exists so its
+absence is stated rather than inferred from a gap, and it is replaced by the measured figure —
+whatever direction that figure points — when the run completes.
+
+Three things will travel with it, and they are not optional garnish:
+
+**The MDE the run actually has.** The design is powered for **6.23 pp** at N=2,000. If the run
+finishes short — the provider's account quota has ended it twice — the report recomputes the
+MDE at the achieved N and prints both numbers. At N=1,153 that is 8.18 pp, a third worse than
+the design, and quoting an effect against a power the run does not have overstates what it can
+see.
+
+**The direction of the known bias.** On this provider the JSON schema is *requested, not
+enforced* (A-024), so a malformed response drives a `DETERMINISTIC`-labelled fallback — a fixed
+template on a fixed schedule, which is behaviourally close to the control arm. Schema
+violations therefore pull measured lift **toward null**. Fixed in advance so it cannot be
+applied selectively: a small or null lift may cite them; a large positive lift may not.
+
+**The accuracy of the component that made the decisions.** Below.
+
+### Reply understanding — measured
+
+**Run 2026-09-02 · `gpt-oss:120b` via Ollama Cloud, digest `d98fe6ba01e6` · 60 hand-labelled
+fixtures, labelled before any model was called.**
+
+| | value | 95% CI (Wilson) |
+|---|---|---|
+| Intent accuracy | **94.2%** (49/52) | **[84.4%, 98.0%]** |
+| Promise-date extraction | 90.9% (10/11) | [62.3%, 98.4%] |
+
+**Read the interval before quoting the point estimate.** The intent CI's lower bound is
+**84.4%, below the 85% pre-registered bar**. The point estimate clears it; the interval does
+not exclude values that fail it. The honest sentence is *"94.2%, and the data are consistent
+with true accuracy anywhere from 84% to 98%"*.
+
+The denominator is 52, not 60: `deterministic_opt_out()` runs upstream of the model, so 8
+opt-out fixtures never reach it. An accuracy over all 60 would pool the matcher's correctness
+with the model's and report the total as the model's.
+
+### A/A instrument validation — measured
+
+**Run 2026-08-31 · seed 20260831 · 1,000 per arm · pre-registered and pushed before the run.**
+Difference **−0.30 pp**, 95% CI [−4.67, +4.07], **p = 0.8932**.
+
+**The A/A test passed**, and the next sentence is not optional: a pass rules out harness bias
+larger than about **6.23 percentage points**. It does **not** establish an unbiased harness. An
+effect smaller than 6.23 pp could sit in the harness unseen.
+
+### Not run, and declared
+
+The `llm`-marked half of the adversarial eval, and the full-pipeline A/A. Both have their own
+headings in [`EVAL_RESULTS.md`](EVAL_RESULTS.md) rather than being omitted.
+
+---
+
 ## Limitations
 
 Stated here rather than left to be found. This section grows as the build does; nothing is
 removed from it.
+
+### The figure is pinned to the code that produced it, which is not always HEAD
+
+A long-running batch executes the version it loaded. This run spans two commits and three
+concurrency settings across two resumes, recorded in `runs/batch-2000.provenance.json` with the
+subscription range each produced — the figure is pinned to a *set*, not a commit.
+
+The pins were shown to be output-equivalent rather than argued to be: the batch was run under
+both, and under concurrency 1, 2 and 4, and every ledger row compared identical. Draws are keyed
+on `(seed, subscription_id, attempt_no, day_offset)` rather than taken from a shared RNG, which
+is what makes concurrency-invariance demonstrable instead of hopeful.
+
+### The schema is requested, not enforced
+
+Ollama accepts a JSON schema and ignores it — both `format=` and
+`response_format: {strict: true}` return HTTP 200 and invent their own keys (A-024, measured
+across three routes). The schema is therefore spelled into the prompt, and output is validated
+by Pydantic at the boundary, so a non-conforming answer is a caught failure rather than a
+silently accepted one. What is gone is constrained decoding.
 
 ### The counterfactual is assumed, not measured
 
@@ -219,8 +301,15 @@ believe the paragraph above it.
 
 ## Status
 
-Under construction for the 5 September 2026 deadline. Architecture and reproduction steps land
-before submission; the limitations above are current.
+Built for the 5 September 2026 deadline. What is measured is under **Results** with its
+intervals; what is not measured says so under its own heading, in this file and in
+[`EVAL_RESULTS.md`](EVAL_RESULTS.md).
+
+The incident log is [`INCIDENTS.md`](INCIDENTS.md) and it is not a formality: eleven entries,
+written when each defect was found rather than reconstructed afterwards. Three of them
+(INC-007, INC-009, and the fallback-series windowing) are one class — an artifact that is
+computed, rendered and entirely plausible whose *label does not describe what it contains*.
+Each would have produced a confident wrong number rather than an error.
 
 ## Development
 
