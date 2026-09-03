@@ -1,0 +1,16 @@
+{
+  "name": "recoup-video",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Silent, fully captioned render of the recoup submission. No narration: every sentence is on screen.",
+  "scripts": {
+    "render": "remotion render src/index.ts recoup out/recoup.mp4",
+    "smoke": "remotion render src/index.ts smoke out/smoke.mp4"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.520",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "remotion": "4.0.520"
+  }
+}

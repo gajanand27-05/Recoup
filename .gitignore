@@ -58,3 +58,14 @@ htmlcov/
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# ---------------------------------------------------------------------------
+# Video build (Task 25). The SOURCE ships; the toolchain and the render do not.
+# node_modules is 249 packages, and the MP4 is a build output -- both are
+# reproducible from video/package.json and the committed data.
+# build-provenance.json DOES ship: it records the environment that produced the
+# artifact, and provenance that does not ship is not provenance (INC-011).
+# ---------------------------------------------------------------------------
+video/node_modules/
+video/out/
+video/.remotion/
