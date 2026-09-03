@@ -202,14 +202,6 @@ misclassifications makes the test a coin-flip on temperature.
 
 ---
 
-## Full-pipeline A/A — pre-registered for after Task 22
-
-**NOT RUN at time of writing.** Pre-registered in `EXPERIMENT.md` and not dropped. If the
-submission deadline arrives first it is reported as not-run under this heading, which is a
-different and honest thing from being omitted.
-
----
-
 ## A/A instrument validation — Task 13
 
 **Run 2026-08-31 · seed 20260831 · 1,000 per arm · pre-registered and pushed before the run.**

@@ -162,6 +162,7 @@ class BatchRunner:
         checkpoint_dir: str = "runs/checkpoints",
         horizon_days: int = HORIZON_DAYS,
         concurrency: int = 1,
+        decider_factory=None,
     ) -> None:
         self.run_id = run_id
         self.seed = seed
@@ -179,6 +180,15 @@ class BatchRunner:
         self.checkpoint = Path(checkpoint_dir) / f"{run_id}.jsonl"
         self.checkpoint.parent.mkdir(parents=True, exist_ok=True)
         self.concurrency = concurrency
+        # How an arm's decision module is obtained. Injectable ONLY so the
+        # full-pipeline A/A can run both arms on the identical control policy
+        # through this same path -- generator, assignment, transport, ledger,
+        # replay, lift. An A/A that used a different runner would validate a
+        # different pipeline from the one that produces the figure.
+        #
+        # Defaults to the real registry, so a normal run cannot accidentally get
+        # a substituted decider.
+        self._decider_factory = decider_factory or decider_for
         self._ledger_lock = threading.Lock()
         self._checkpoint_lock = threading.Lock()
 
@@ -351,7 +361,7 @@ class BatchRunner:
         )
         state = _State(scenario, arm)
         self._restore_state(state, scenario)
-        decider = decider_for(arm, client=self.llm_client)
+        decider = self._decider_factory(arm, client=self.llm_client)
         start = now_utc()
 
         for day in range(self.horizon_days):

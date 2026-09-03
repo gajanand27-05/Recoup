@@ -196,10 +196,38 @@ Difference **−0.30 pp**, 95% CI [−4.67, +4.07], **p = 0.8932**.
 larger than about **6.23 percentage points**. It does **not** establish an unbiased harness. An
 effect smaller than 6.23 pp could sit in the harness unseen.
 
+### Full-pipeline A/A — measured
+
+**Both arms on the identical control policy through the real path**, seed 20260904 from outside
+the powered N. Difference −2.71 pp, 95% CI [−6.69, +1.30], p = 0.1848.
+
+**The A/A test passed**, with the scope that must travel with it: a pass rules out harness bias
+larger than about **6.23 percentage points**. It does **not** establish an unbiased harness.
+
+It was shown capable of detecting something first — a known effect was injected and the
+pipeline reported it (+4.21 pp, p = 0.0451). A test that passes by finding nothing is worthless
+until it has been shown able to find something.
+
+### 🚨 The experiment is underpowered for the intervention it tested
+
+That detection check found something worse than it was looking for. Over the frozen curve, the
+gap between the most aggressive schedule `STOP-001` allows and the one the control uses is
+**1.53 pp**. The MDE is **6.23 pp**.
+
+**The largest difference any legitimate schedule change can produce is about a quarter of the
+smallest difference this experiment can reliably detect.** A null was therefore close to the
+expected outcome for any intervention working on schedule, channel or timing. Closing the gap
+would need roughly 34,000 subscriptions, or a lever somewhere other than the schedule.
+
+This does not excuse the null. It says the design was underpowered for its own intervention
+class — computable from the frozen curve since Task 8, and not checked until after the run
+(A-028).
+
 ### Not run, and declared
 
-The `llm`-marked half of the adversarial eval, and the full-pipeline A/A. Both have their own
-headings in [`EVAL_RESULTS.md`](EVAL_RESULTS.md) rather than being omitted.
+The `llm`-marked half of the adversarial eval, which needs live model calls the provider's
+quota is better spent elsewhere. It has its own heading in
+[`EVAL_RESULTS.md`](EVAL_RESULTS.md) rather than being omitted.
 
 ---
 

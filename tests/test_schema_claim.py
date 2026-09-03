@@ -26,7 +26,7 @@ from pathlib import Path
 
 import pytest
 
-from recoup.agent.llm import AnthropicLLM, GeminiLLM, OllamaLLM
+from recoup.agent.llm import AnthropicLLM, GeminiLLM, OllamaLLM, StubLLM
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -36,6 +36,12 @@ SCHEMA_ENFORCED_BY_PROVIDER = {
     GeminiLLM: True,     # response_schema constrains decoding
     AnthropicLLM: True,  # tool_choice forces the tool's input_schema
     OllamaLLM: False,    # A-024: accepts `format`, ignores it, returns HTTP 200
+    # There is no provider, so nothing constrains anything. Declared False rather
+    # than omitted: it was omitted, and the walk-the-module check found it. An
+    # undeclared client inherits whatever the reader assumes, and for a stub the
+    # assumption that matters is that its output could reach a figure — which
+    # `require_real_model()` and `provenance_gate` both refuse.
+    StubLLM: False,
 }
 
 
@@ -132,3 +138,32 @@ def test_no_shipped_document_claims_the_schema_is_enforced(filename):
             f"{filename} claims schema enforcement: {match.group(0)!r}. "
             f"On Ollama the schema is requested and ignored (A-024)."
         )
+
+
+def test_every_llm_client_in_the_module_is_declared():
+    """WALK THE MODULE, do not name three classes.
+
+    `SCHEMA_ENFORCED_BY_PROVIDER` is parametrised over its own keys, so it can
+    only ever check the clients it already lists. A fourth client added later
+    would inherit whichever guarantee the reader assumes — which is exactly the
+    defect that let `assert "\b" not in _NEGATION.pattern` watch the same bug
+    happen to a second pattern.
+    """
+    import inspect
+
+    from recoup.agent import llm
+
+    clients = {
+        obj for _, obj in inspect.getmembers(llm, inspect.isclass)
+        if obj.__module__ == llm.__name__
+        and hasattr(obj, "classify_reply")
+        and obj.__name__ != "LLMTransport"
+    }
+    undeclared = {c.__name__ for c in clients} - {
+        c.__name__ for c in SCHEMA_ENFORCED_BY_PROVIDER
+    }
+    assert not undeclared, (
+        f"{sorted(undeclared)} are LLM clients with no entry in "
+        f"SCHEMA_ENFORCED_BY_PROVIDER. Declare whether the provider constrains "
+        f"decoding; an undeclared client inherits whatever the reader assumes."
+    )

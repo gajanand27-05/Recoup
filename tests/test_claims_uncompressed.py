@@ -34,9 +34,13 @@ REPO = Path(__file__).resolve().parents[1]
 #: Files that state these claims to a reader. Local-only files are checked when
 #: present and skipped when not — a shipped test may not require a gitignored
 #: file (the 59061cd failure).
+#: Kept in sync with the repository by
+#: `test_the_candidate_list_covers_every_markdown_document_that_ships`, which
+#: walks `*.md` rather than trusting this literal. SIMULATOR_FREEZE.md was
+#: missing from it and that check is what found it.
 CANDIDATES = (
     "README.md", "EVAL_RESULTS.md", "EXPERIMENT.md", "VIDEO.md",
-    "SUBMISSION.md", "INCIDENTS.md",
+    "SUBMISSION.md", "INCIDENTS.md", "SIMULATOR_FREEZE.md",
 )
 
 #: ASSUMPTION: a qualifier this far from its number is still read as attached to
@@ -459,3 +463,33 @@ def test_a_disavowed_near_miss_is_permitted():
 def test_no_pattern_in_this_module_holds_a_literal_backspace():
     """Runs the module-wide check as a test, so it cannot be skipped at import."""
     _assert_no_literal_backspaces()
+
+
+def test_the_candidate_list_covers_every_markdown_document_that_ships():
+    """WALK THE REPOSITORY, do not name six files.
+
+    `CANDIDATES` is a fixed list, and a document added later — a submission
+    write-up, a one-pager — would carry these claims unchecked. Same shape as an
+    assertion naming one compiled pattern, or a coverage test naming its arms in
+    a literal instead of walking the registry.
+
+    Directories excluded because their contents are not claims to a reader:
+    `docs/` is the design spec (local-only), `src/` holds `PARAMS.md` which is a
+    parameter register, and `.github/` is CI config.
+    """
+    shipped = {
+        path.name for path in REPO.glob("*.md")
+        if path.name not in {"CLAUDE.md", "PLAN.md", "DECISION.md", "LOGS.md"}
+    }
+    unchecked = shipped - set(CANDIDATES)
+    assert not unchecked, (
+        f"{sorted(unchecked)} are top-level markdown documents not in CANDIDATES, "
+        f"so none of the five sentence guards apply to them. Add them, or state "
+        f"why they carry no claims."
+    )
+
+
+def test_the_result_files_are_a_subset_of_the_candidates():
+    """A result file outside CANDIDATES would be checked by the result guards and
+    not by the A/A or accuracy ones — a split nobody would notice."""
+    assert set(RESULT_FILES) <= set(CANDIDATES)

@@ -137,6 +137,21 @@ PARAMS: dict[str, dict] = {
 class FixedIntervalOutreach:
     """No decisioning. Same channel, same copy, same schedule, every time."""
 
+    def __init__(self, schedule_days: tuple[int, ...] | None = None) -> None:
+        """`schedule_days` defaults to the measured SCHEDULE_DAYS.
+
+        Injectable ONLY so the full-pipeline A/A can give one arm a known better
+        schedule and confirm the pipeline REPORTS it. A test that passes by
+        finding nothing has to be shown capable of finding something, and the
+        first version of that check set an attribute this class did not read --
+        so the injection was inert and the check would have failed for the wrong
+        reason, reporting "cannot detect" about a pipeline that can.
+
+        The default is the measured schedule, so a normal run cannot get a
+        substituted one by accident.
+        """
+        self.schedule_days = schedule_days or SCHEDULE_DAYS
+
     def propose(self, state, context: dict, now: datetime) -> Action | None:
         # 1. Opted out is absolute. The policy engine would veto anyway, but the
         #    baseline should not propose actions it already knows are dead.
@@ -151,10 +166,10 @@ class FixedIntervalOutreach:
             return None
 
         day_offset = context.get("day_offset", 0)
-        if day_offset not in SCHEDULE_DAYS:
+        if day_offset not in self.schedule_days:
             return None
 
-        attempt_no = SCHEDULE_DAYS.index(day_offset) + 1
+        attempt_no = self.schedule_days.index(day_offset) + 1
         if attempt_no in state.attempts_seen:
             return None
 
