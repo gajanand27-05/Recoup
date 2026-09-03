@@ -139,6 +139,25 @@ def main() -> int:
             say()
             return 1
 
+    # --- the fallback rate as a SERIES ------------------------------------
+    from recoup.batch.series import fallback_series, read_checkpoint, render_series
+
+    checkpoint = REPO / "runs" / "checkpoints" / f"{args.run_id}.jsonl"
+    windows = fallback_series(read_checkpoint(checkpoint))
+    if windows:
+        say("## Fallback rate over the run")
+        say()
+        say("Not a closing figure. 5% overall is consistent with 5% throughout and")
+        say("with 1% rising to 12%, and those are different claims about the")
+        say("toward-null bias. Windows are SUBMISSION-index ranges, not completion")
+        say("order — control subscriptions finish in milliseconds and treatment ones")
+        say("in ~20s, so a window of completions is a window of whichever arm is")
+        say("faster.")
+        say()
+        for line in render_series(windows):
+            say(line)
+        say()
+
     # --- the number -------------------------------------------------------
     say("## Recovery lift")
     say()
