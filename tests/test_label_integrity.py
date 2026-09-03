@@ -252,3 +252,42 @@ def test_every_table_in_the_report_has_a_label_test_here():
         f"asserts, then construct the input where that diverges from what it "
         f"contains."
     )
+
+
+# --- "MDE" asserts: the power THIS run has, not the one it was designed for --------
+
+
+def test_the_mde_uses_the_harmonic_mean_for_unequal_arms():
+    """The label says what this run can detect. With unequal arms, `min()` is not
+    that number — the variance of the difference depends on 2*n1*n2/(n1+n2).
+
+    Mid-run the arms are lopsided by construction: control subscriptions finish
+    in milliseconds and treatment ones in ~20 seconds. `min()` reported 11.77 pp
+    where the effective figure is 9.49.
+    """
+    from recoup.eval.power import BASELINE_P1, mde_at_n
+
+    n1, n2 = 960, 274
+    effective = int(2 * n1 * n2 / (n1 + n2))
+    assert effective == 426
+    assert mde_at_n(BASELINE_P1, effective) < mde_at_n(BASELINE_P1, min(n1, n2))
+
+
+def test_the_harmonic_mean_agrees_with_the_design_when_arms_are_balanced():
+    """It must not quietly change the pre-registered figure for a balanced run."""
+    from recoup.eval.power import BASELINE_P1, mde_at_n
+
+    effective = int(2 * 1000 * 1000 / 2000)
+    assert effective == 1000
+    assert round(mde_at_n(BASELINE_P1, effective) * 100, 2) == 6.23
+
+
+def test_a_partial_run_reports_a_worse_mde_than_the_design():
+    """The direction that matters. A shortfall must never report the power it
+    was designed for."""
+    from recoup.eval.power import BASELINE_P1, mde_at_n
+
+    full = mde_at_n(BASELINE_P1, 1000)
+    partial = mde_at_n(BASELINE_P1, 576)
+    assert partial > full
+    assert round(partial * 100, 2) == 8.18

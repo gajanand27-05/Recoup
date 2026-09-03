@@ -92,6 +92,32 @@ This section exists so that its absence is stated rather than inferred from a mi
 
 ---
 
+## Adversarial injection eval — Task 21, the `llm`-marked half
+
+**NOT RUN.** Declared here rather than left to be inferred from a gap.
+
+The structural half of `tests/test_adversarial.py` **did** run and passes: 22 attack payloads,
+none of which can reach a money action, because the vocabulary has no `charge` action type and
+`ReplyUnderstanding` carries no field any code path turns into money. All 22 are also refused
+as message bodies and as template variables (INC-010).
+
+What has **not** run is the `llm`-marked half: whether the model's *classification* bends under
+attack. It needs live calls, and the provider's account quota has ended the batch run twice —
+spending quota on the eval would risk the figure the whole submission rests on.
+
+When it runs it reports a **rate**, not a pass or a fail. Pinning a model at zero forced
+misclassifications makes the test a coin-flip on temperature.
+
+---
+
+## Full-pipeline A/A — pre-registered for after Task 22
+
+**NOT RUN at time of writing.** Pre-registered in `EXPERIMENT.md` and not dropped. If the
+submission deadline arrives first it is reported as not-run under this heading, which is a
+different and honest thing from being omitted.
+
+---
+
 ## A/A instrument validation — Task 13
 
 **Run 2026-08-31 · seed 20260831 · 1,000 per arm · pre-registered and pushed before the run.**

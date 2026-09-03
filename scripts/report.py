@@ -34,6 +34,15 @@ from recoup.eval.stats import wilson_interval  # noqa: E402
 from recoup.eval.views import LiftView  # noqa: E402
 from recoup.ledger.replay import count_unattributable, replay  # noqa: E402
 
+#: PRE-REGISTERED in EXPERIMENT.md before any run. Both this and the actual N
+#: appear in the report when they differ, so a shortfall is stated rather than
+#: inferred from a number that happens to be smaller (A-026).
+PLANNED_N = 2000
+#: DERIVED from mde_at_n(0.51, 1000) at alpha=0.05, power=0.80. Recomputed by the
+#: report at the ACTUAL N rather than assumed, because an effect quoted against a
+#: power the run does not have overstates what the run can see.
+PLANNED_MDE_PP = 6.23
+
 #: MEASURED 2026-09-02, `gpt-oss:120b`, 52 model-classified fixtures.
 #: Carried here so the lift never appears without the accuracy of the component
 #: that produced the decisions. See EVAL_RESULTS.md.
@@ -172,6 +181,37 @@ def main() -> int:
     for line in result.describe().splitlines():
         say(line)
     say("```")
+    say()
+
+    # --- the MDE THIS run actually has, not the one it was designed for ----
+    from recoup.eval.power import BASELINE_P1, mde_at_n
+
+    actual_n = result.control.n + result.treatment.n
+    # HARMONIC MEAN, not min(). The two-proportion design assumes equal arms; when
+    # they are not, the effective per-arm size is 2*n1*n2/(n1+n2), which is what
+    # the variance of the difference actually depends on.
+    #
+    # min() was the first version and it is materially wrong mid-run: control
+    # subscriptions finish in milliseconds and treatment ones in ~20s, so a
+    # partial run is lopsided and min() reported 13.73 pp where the effective
+    # figure is nearer 9. Conservative, but a wrong number stated confidently is
+    # not made acceptable by pointing the wrong way.
+    n1, n2 = result.control.n, result.treatment.n
+    effective_per_arm = int(2 * n1 * n2 / (n1 + n2)) if (n1 + n2) else 0
+    actual_mde = mde_at_n(BASELINE_P1, effective_per_arm) * 100
+    if actual_n < PLANNED_N:
+        say(f"**This run is N = {actual_n}, not the pre-registered N = {PLANNED_N}.** "
+            f"The provider's account quota ended the batch twice; the shortfall is a "
+            f"quota, not a design choice, and reducing N to finish sooner was refused "
+            f"(A-026).")
+        say()
+        say(f"So the minimum detectable effect is **{actual_mde:.2f} pp**, not the "
+            f"{PLANNED_MDE_PP:.2f} pp the design was powered for. An effect smaller "
+            f"than {actual_mde:.2f} pp is not distinguishable from noise by this run, "
+            f"and quoting it against {PLANNED_MDE_PP:.2f} pp would overstate what it "
+            f"can see.")
+    else:
+        say(f"N = {actual_n} as pre-registered; MDE **{actual_mde:.2f} pp**.")
     say()
 
     lo, hi = wilson_interval(*INTENT_ACCURACY)
