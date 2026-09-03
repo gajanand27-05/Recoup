@@ -153,6 +153,16 @@ class DailyQuotaExhausted(RuntimeError):
     """The per-DAY quota is gone. Waiting will not help; say so immediately."""
 
 
+class TransientNetworkFailure(RuntimeError):
+    """The provider could not be reached, repeatedly.
+
+    Distinct from `UsageLimitReached` because the remedies are opposite: a
+    network fault is worth retrying and a quota is not. Distinct from a bare
+    `httpx` error because by the time this is raised it has already been retried
+    and the caller should stop rather than try again.
+    """
+
+
 class UsageLimitReached(RuntimeError):
     """An ACCOUNT quota, not a rate or concurrency limit.
 
@@ -461,12 +471,35 @@ class OllamaLLM:
         }
         response = None
         for attempt in range(1, self.CONCURRENCY_MAX_ATTEMPTS + 1):
-            response = httpx.post(
-                f"{self._host}/api/chat",
-                json=payload,
-                headers={"Authorization": f"Bearer {self._key}"},
-                timeout=self._timeout,
-            )
+            try:
+                response = httpx.post(
+                    f"{self._host}/api/chat",
+                    json=payload,
+                    headers={"Authorization": f"Bearer {self._key}"},
+                    timeout=self._timeout,
+                )
+            except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ConnectError,
+                    httpx.RemoteProtocolError) as exc:
+                # A TRANSIENT NETWORK FAULT IS NOT A REASON TO LOSE A RUN.
+                #
+                # A single `httpx.ReadTimeout` killed a 3-hour batch at
+                # 1354/2000 (INC-012). The retry loop below existed and covered
+                # only 429s, so an exception thrown before any response arrived
+                # went straight past it and out through the thread pool.
+                #
+                # Bounded, because a provider that is down should be reported as
+                # down rather than retried into for an hour. Distinguished from a
+                # quota, which retrying cannot fix at all.
+                if attempt == self.CONCURRENCY_MAX_ATTEMPTS:
+                    raise TransientNetworkFailure(
+                        f"{self.model}: {self.CONCURRENCY_MAX_ATTEMPTS} consecutive "
+                        f"network failures talking to {self._host}. Last: "
+                        f"{type(exc).__name__}: {exc}. The run is resumable -- "
+                        f"re-invoking with the same run_id continues from the "
+                        f"checkpoint."
+                    ) from exc
+                time.sleep(self.CONCURRENCY_BACKOFF_SECONDS * attempt)
+                continue
             if response.status_code != 429:
                 break
             # A THIRD meaning of 429, distinct from Gemini's per-minute and

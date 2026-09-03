@@ -560,3 +560,98 @@ def test_two_ollama_tiers_are_refused_as_one_figure(monkeypatch):
     ]
     with pytest.raises(ModelProvenanceError, match="two instruments"):
         require_real_model(results, run_id="run-ollama-mixed")
+
+
+# --- transient network faults must not lose a run (INC-012) ------------------------
+
+
+def test_a_transient_timeout_is_retried_rather_than_losing_the_run(monkeypatch):
+    """A single httpx.ReadTimeout killed a 3-hour batch at 1354/2000.
+
+    The retry loop existed and covered only 429s, so an exception raised BEFORE
+    any response arrived went straight past it and out through the thread pool.
+    """
+    import httpx
+
+    from recoup.agent.llm import OllamaLLM
+
+    monkeypatch.setenv("OLLAMA_API_KEY", "test-key-not-real")
+    client = OllamaLLM(model="gpt-oss:120b")
+
+    calls = {"n": 0}
+
+    class _OK:
+        status_code = 200
+        text = ""
+
+        @staticmethod
+        def raise_for_status():
+            return None
+
+        @staticmethod
+        def json():
+            return {"message": {"content": '{"action_type": "wait", "rationale": "x"}'}}
+
+    def flaky(*a, **kw):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise httpx.ReadTimeout("the read operation timed out")
+        return _OK()
+
+    monkeypatch.setattr(httpx, "post", flaky)
+    monkeypatch.setattr("time.sleep", lambda _: None)
+
+    out = client.propose_action("sys", "prompt")
+    assert out == {"action_type": "wait", "rationale": "x"}
+    assert calls["n"] == 3, "the timeout was not retried"
+
+
+def test_a_provider_that_is_down_is_reported_down_rather_than_retried_forever(monkeypatch):
+    """Bounded. A provider that is down should be reported as down."""
+    import httpx
+
+    from recoup.agent.llm import OllamaLLM, TransientNetworkFailure
+
+    monkeypatch.setenv("OLLAMA_API_KEY", "test-key-not-real")
+    client = OllamaLLM(model="gpt-oss:120b")
+
+    calls = {"n": 0}
+
+    def always_down(*a, **kw):
+        calls["n"] += 1
+        raise httpx.ConnectError("no route to host")
+
+    monkeypatch.setattr(httpx, "post", always_down)
+    monkeypatch.setattr("time.sleep", lambda _: None)
+
+    with pytest.raises(TransientNetworkFailure, match="resumable"):
+        client.propose_action("sys", "prompt")
+    assert calls["n"] == OllamaLLM.CONCURRENCY_MAX_ATTEMPTS
+
+
+def test_a_usage_limit_is_not_retried_as_if_it_were_a_network_fault(monkeypatch):
+    """The two remedies are opposite. Retrying a quota cannot fix it, and
+    treating it as transient would burn the retry budget learning nothing."""
+    import httpx
+
+    from recoup.agent.llm import OllamaLLM, UsageLimitReached
+
+    monkeypatch.setenv("OLLAMA_API_KEY", "test-key-not-real")
+    client = OllamaLLM(model="gpt-oss:120b")
+
+    calls = {"n": 0}
+
+    class _Limited:
+        status_code = 429
+        text = '{"error":"you have reached your session usage limit, upgrade"}'
+
+    def limited(*a, **kw):
+        calls["n"] += 1
+        return _Limited()
+
+    monkeypatch.setattr(httpx, "post", limited)
+    monkeypatch.setattr("time.sleep", lambda _: None)
+
+    with pytest.raises(UsageLimitReached, match="ACCOUNT usage limit"):
+        client.propose_action("sys", "prompt")
+    assert calls["n"] == 1, "a quota was retried; it cannot be fixed by waiting"

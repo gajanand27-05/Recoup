@@ -848,3 +848,60 @@ Committing during a long run forks the artifact from the repository. The run doe
 the repository does not know, and the resulting figure quietly belongs to neither. Any run
 producing a reported number records its own commit; mid-run commits touching its code path get
 an equivalence check rather than an assumption.
+
+---
+
+## INC-012 — A three-hour run lost to one read timeout
+
+**2026-09-03. Third death of the N=2,000 batch, and the first with a new cause.**
+
+```
+httpx.ReadTimeout: The read operation timed out
+BATCH DIED at 1354/2000
+```
+
+**Not the quota this time.** The two previous deaths were an Ollama account usage limit;
+this was a transient network fault.
+
+### Why the retry loop did not catch it
+
+`OllamaLLM._chat` had a retry loop, and it covered **429 responses**. A `ReadTimeout` is raised
+*before any response exists*, so it never reached the `if response.status_code != 429` check —
+it propagated straight out of the request call, through the worker thread, and killed the run.
+
+The loop looked like it handled failure. It handled one kind, and the kind it did not handle is
+the more common one.
+
+### The fix
+
+Transient network faults — `ReadTimeout`, `ConnectTimeout`, `ConnectError`,
+`RemoteProtocolError` — are caught and retried with the same bounded backoff, then raised as
+`TransientNetworkFailure` if the provider is genuinely down.
+
+Three exception types now, and the distinction is the point:
+
+| | remedy |
+|---|---|
+| `TransientNetworkFailure` | retry — and it did |
+| `UsageLimitReached` | **do not retry**; a quota cannot be waited out inside a request |
+| `DailyQuotaExhausted` | come back tomorrow |
+
+A quota is deliberately *not* retried: treating it as transient would burn the retry budget
+learning nothing, which is INC-008's mistake in a new costume.
+
+### Planted, and it fired
+
+Removing the `try/except` — the pre-fix state exactly — fails both new tests: the one asserting
+a timeout is retried, and the one asserting a down provider is reported down rather than
+retried forever. The quota test keeps passing, which is correct: it must not be affected.
+
+### The count
+
+The batch has now died three times, at 1326, 1153 and 1354 of 2,000. Two quota, one network.
+Every death has been resumable and no figure has ever been produced from a dead run.
+
+**Lesson kept**
+
+A retry loop that covers one failure mode reads as a retry loop. Ask which exceptions can be
+raised *before* the value you are branching on exists — those bypass every check written in
+terms of it.
