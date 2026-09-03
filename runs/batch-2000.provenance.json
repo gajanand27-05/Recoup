@@ -34,39 +34,47 @@
       "commit": "487fc455a52a6e046fd9fe448e776c8dfb4f2688",
       "short": "487fc45",
       "subscription_index_range": "1-1153",
-      "note": "initial launch 06:43; died at 1153/2000 on an Ollama account usage limit"
+      "note": "initial launch 06:43; died at 1153/2000 on an Ollama account usage limit",
+      "launched_to_cover": "1-1153"
     },
     {
       "commit": "7dbe2c0",
       "short": "7dbe2c0",
-      "subscription_index_range": "1154-2000",
-      "note": "resumed 09:47 after the quota reset"
+      "subscription_index_range": "1154-1354",
+      "note": "resumed 09:47 after the quota reset",
+      "launched_to_cover": "1154-2000"
     },
     {
       "commit": "25ad9c4",
       "short": "25ad9c4",
       "subscription_index_range": "1355-2000",
-      "note": "resumed after INC-012 -- a single httpx.ReadTimeout killed the run at 1354/2000 because the retry loop covered 429 responses only. Transient network faults are now retried."
+      "note": "resumed after INC-012 -- a single httpx.ReadTimeout killed the run at 1354/2000 because the retry loop covered 429 responses only. Transient network faults are now retried.",
+      "launched_to_cover": "1355-2000"
     }
   ],
   "concurrency_schedule": [
     {
       "value": 4,
-      "applied_to": "the SUPERSEDED f5d5288 attempt only; no surviving data"
+      "applied_to": "the SUPERSEDED f5d5288 attempt only; no surviving data",
+      "produced_surviving_data": false
     },
     {
       "value": 3,
-      "subscription_index_range": "1-1153"
+      "subscription_index_range": "1-1153",
+      "produced_surviving_data": true
     },
     {
       "value": 2,
-      "subscription_index_range": "1154-2000",
-      "why": "lower burn rate to reach further before the next quota wall"
+      "subscription_index_range": "1154-1354",
+      "why": "lower burn rate to reach further before the next quota wall",
+      "launched_to_cover": "1154-2000",
+      "produced_surviving_data": true
     },
     {
       "value": 2,
       "subscription_index_range": "1355-2000",
-      "why": "unchanged from the previous segment"
+      "why": "unchanged from the previous segment",
+      "produced_surviving_data": true
     }
   ],
   "equivalence_demonstrated": {

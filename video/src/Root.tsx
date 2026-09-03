@@ -1,21 +1,27 @@
 import React from "react";
 import { Composition } from "remotion";
+import { Recoup, TOTAL_FRAMES } from "./Recoup";
 import { Smoke } from "./Smoke";
-
-export const FPS = 30;
+import { FPS, HEIGHT, WIDTH } from "./theme";
 
 export const RemotionRoot: React.FC = () => (
   <>
-    {/* STEP 0a: a trivial composition rendered BEFORE any content exists.
-        Discovering an ffmpeg or Chromium problem after six scenes exist is the
-        expensive order. */}
+    <Composition
+      id="recoup"
+      component={Recoup}
+      durationInFrames={TOTAL_FRAMES}
+      fps={FPS}
+      width={WIDTH}
+      height={HEIGHT}
+    />
+    {/* Kept: the toolchain check that ran before any content existed. */}
     <Composition
       id="smoke"
       component={Smoke}
       durationInFrames={3 * FPS}
       fps={FPS}
-      width={1920}
-      height={1080}
+      width={WIDTH}
+      height={HEIGHT}
     />
   </>
 );

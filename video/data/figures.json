@@ -1,0 +1,206 @@
+{
+  "_generated_by": "scripts/video_data.py",
+  "_rule": "No figure on screen is a literal. Every number here was computed by the module that owns it, at the moment this file was written.",
+  "run": {
+    "run_id": "batch-2000",
+    "n": 2000,
+    "planned_n": 2000,
+    "seed": 20260902,
+    "transport": "sim",
+    "model": {
+      "id": "gpt-oss:120b",
+      "digest": "d98fe6ba01e6",
+      "confirmation": "CONFIRMED_BY_REGISTRY"
+    },
+    "code_pins": [
+      {
+        "commit": "487fc455a52a6e046fd9fe448e776c8dfb4f2688",
+        "short": "487fc45",
+        "subscription_index_range": "1-1153",
+        "note": "initial launch 06:43; died at 1153/2000 on an Ollama account usage limit",
+        "launched_to_cover": "1-1153"
+      },
+      {
+        "commit": "7dbe2c0",
+        "short": "7dbe2c0",
+        "subscription_index_range": "1154-1354",
+        "note": "resumed 09:47 after the quota reset",
+        "launched_to_cover": "1154-2000"
+      },
+      {
+        "commit": "25ad9c4",
+        "short": "25ad9c4",
+        "subscription_index_range": "1355-2000",
+        "note": "resumed after INC-012 -- a single httpx.ReadTimeout killed the run at 1354/2000 because the retry loop covered 429 responses only. Transient network faults are now retried.",
+        "launched_to_cover": "1355-2000"
+      }
+    ],
+    "concurrency_schedule": [
+      {
+        "value": 4,
+        "applied_to": "the SUPERSEDED f5d5288 attempt only; no surviving data",
+        "produced_surviving_data": false
+      },
+      {
+        "value": 3,
+        "subscription_index_range": "1-1153",
+        "produced_surviving_data": true
+      },
+      {
+        "value": 2,
+        "subscription_index_range": "1154-1354",
+        "why": "lower burn rate to reach further before the next quota wall",
+        "launched_to_cover": "1154-2000",
+        "produced_surviving_data": true
+      },
+      {
+        "value": 2,
+        "subscription_index_range": "1355-2000",
+        "why": "unchanged from the previous segment",
+        "produced_surviving_data": true
+      }
+    ]
+  },
+  "lift": {
+    "control": {
+      "recovered": 310,
+      "n": 1035,
+      "rate_pct": 29.95
+    },
+    "treatment": {
+      "recovered": 303,
+      "n": 965,
+      "rate_pct": 31.4
+    },
+    "diff_pp": 1.45,
+    "ci_low_pp": -2.59,
+    "ci_high_pp": 5.49,
+    "p_value": 0.483,
+    "significant": false,
+    "mde_pp": 6.24,
+    "min_arm": 965
+  },
+  "power_ceiling": {
+    "schedules": [
+      {
+        "days": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "recovery": 0.3536,
+        "is_control": false
+      },
+      {
+        "days": [
+          0,
+          1,
+          3,
+          5,
+          7
+        ],
+        "recovery": 0.3513,
+        "is_control": false
+      },
+      {
+        "days": [
+          0,
+          2,
+          4,
+          7,
+          10
+        ],
+        "recovery": 0.3383,
+        "is_control": true
+      },
+      {
+        "days": [
+          0,
+          2,
+          5,
+          9,
+          14
+        ],
+        "recovery": 0.3176,
+        "is_control": false
+      },
+      {
+        "days": [
+          0,
+          3,
+          7,
+          15,
+          30
+        ],
+        "recovery": 0.2897,
+        "is_control": false
+      }
+    ],
+    "best_pp": 35.36,
+    "control_pp": 33.83,
+    "ceiling_pp": 1.53,
+    "mde_pp": 6.24,
+    "ratio": 4.1,
+    "n_needed": 33000.0,
+    "alpha": 0.05,
+    "power": 0.8,
+    "baseline_p1": 0.51
+  },
+  "arms": {
+    "control": {
+      "subscriptions": 1035,
+      "actions_proposed": 4353,
+      "actions_sent": 4353,
+      "actions_vetoed": 0,
+      "replans": 0,
+      "model_decided": 0,
+      "fallbacks": 0,
+      "recovered": 310,
+      "recovered_paise": 31229000,
+      "spend_paise": 52236
+    },
+    "treatment": {
+      "subscriptions": 965,
+      "actions_proposed": 6579,
+      "actions_sent": 3637,
+      "actions_vetoed": 474,
+      "replans": 0,
+      "model_decided": 3637,
+      "fallbacks": 0,
+      "recovered": 303,
+      "recovered_paise": 27839700,
+      "spend_paise": 43845
+    }
+  },
+  "accuracy": {
+    "intent": {
+      "correct": 49,
+      "n": 52,
+      "pct": 94.2,
+      "ci_low": 84.4,
+      "ci_high": 98.0,
+      "bar": 85.0
+    },
+    "date": {
+      "correct": 10,
+      "n": 11,
+      "pct": 90.9,
+      "ci_low": 62.3,
+      "ci_high": 98.4,
+      "bar": 80.0
+    }
+  },
+  "aa": {
+    "a": 513,
+    "b": 510,
+    "n_per_arm": 1000,
+    "bound_pp": 6.23
+  },
+  "completeness": {
+    "ledger_rows": 8617,
+    "subscriptions": 2000,
+    "unattributable": 0
+  }
+}

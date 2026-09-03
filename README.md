@@ -195,7 +195,7 @@ change can produce is 1.53 pp — roughly a quarter of it.**
 So the experiment was **structurally incapable of detecting the intervention it was built to
 test**. A null was close to the *expected* outcome for any agent operating on schedule, channel
 or timing, whatever the agent did, because the frozen curve does not make those levers worth
-6 percentage points. Detecting a 1.53 pp effect at this power needs roughly **34,000
+6 percentage points. Detecting a 1.53 pp effect at this power needs roughly **33,000
 subscriptions**, seventeen times the N that ran.
 
 ### The ordering, which is not flattering
@@ -218,7 +218,7 @@ available at every point and was not asked.
 
 ### It was not acted on, deliberately
 
-A reader will wonder why the answer is not simply to re-run at 34,000. Because
+A reader will wonder why the answer is not simply to re-run at 33,000. Because
 [`EXPERIMENT.md`](EXPERIMENT.md) Addendum 3 fixed the stopping rule at 12 of 2,000
 subscriptions, before any figure existed: **this batch is the run**, and re-running at a larger
 N after seeing a null is optional stopping however good the reason sounds. The power
