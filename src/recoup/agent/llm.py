@@ -153,6 +153,16 @@ class DailyQuotaExhausted(RuntimeError):
     """The per-DAY quota is gone. Waiting will not help; say so immediately."""
 
 
+class UsageLimitReached(RuntimeError):
+    """An ACCOUNT quota, not a rate or concurrency limit.
+
+    Separate from `DailyQuotaExhausted` because it comes from a different
+    provider with a different reset rule, and separate from a plain 429 because
+    the remedy is different: concurrency cannot be lowered enough to fix having
+    run out of quota.
+    """
+
+
 def _is_daily_quota(exc: Exception) -> bool:
     """True when the exhausted quota resets tomorrow rather than next minute.
 
@@ -464,13 +474,28 @@ class OllamaLLM:
             # own, so it is waited out rather than treated as exhaustion --
             # but only up to a bound, because a permanent 429 that is retried
             # forever is a batch that never finishes and never says why.
+            # A FOURTH meaning of 429 in this codebase, and the message used to
+            # name the wrong one. Ollama returns the same status for "too many
+            # concurrent requests" (transient, clears in seconds) and for
+            # "you have reached your session usage limit" (an account quota that
+            # does not clear by waiting). Telling someone to reduce concurrency
+            # when they have run out of quota sends them to fix the wrong thing.
+            body = response.text
+            if "usage limit" in body or "upgrade" in body:
+                raise UsageLimitReached(
+                    f"{self.model}: the ACCOUNT usage limit is reached, not a "
+                    f"concurrency limit. Lowering --concurrency will not help; "
+                    f"the quota resets on the provider's schedule or needs a plan "
+                    f"change. Body: {body[:200]}"
+                )
             if attempt == self.CONCURRENCY_MAX_ATTEMPTS:
                 raise RuntimeError(
                     f"{self.model}: {self.CONCURRENCY_MAX_ATTEMPTS} consecutive "
-                    f"429s from {self._host}. Observed ceiling is "
+                    f"429s from {self._host}, and none of them mentioned a usage "
+                    f"limit. Observed ceiling is "
                     f"{self.OBSERVED_CONCURRENCY_LIMIT} concurrent requests "
                     f"(measured 2026-09-02); reduce concurrency rather than "
-                    f"retrying into it. Body: {response.text[:200]}"
+                    f"retrying into it. Body: {body[:200]}"
                 )
             time.sleep(self.CONCURRENCY_BACKOFF_SECONDS * attempt)
 
