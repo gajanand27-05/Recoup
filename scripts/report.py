@@ -67,7 +67,11 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="render the batch as a report")
     ap.add_argument("--run-id", default="batch-2000")
     ap.add_argument("--db", default=None)
-    ap.add_argument("--amount-paise", type=int, default=49900)
+    ap.add_argument("--n", type=int, default=2000,
+                    help="cohort size, used to regenerate per-subscription amounts")
+    ap.add_argument("--seed", type=int, default=20260902)
+    ap.add_argument("--amount-paise", type=int, default=49900,
+                    help="fallback only, for a subscription not in the cohort")
     ap.add_argument("--out", default=None, help="write markdown here as well")
     args = ap.parse_args()
 
@@ -80,11 +84,63 @@ def main() -> int:
         return 1
 
     states = replay(rows)
+
+    # PER-SUBSCRIPTION AMOUNTS, regenerated from (n, seed).
+    #
+    # The ledger does not store `amount_paise`. This used to pass one CLI default
+    # for every subscription, so every money figure was computed on a constant
+    # that is not true of the cohort -- scenario amounts range over Rs 299 to
+    # Rs 4,999. The recovery RATE counts subscriptions and is unaffected, but the
+    # recovered-amount difference and its bootstrap interval were not.
+    #
+    # Found by auditing what the ledger cannot reconstruct about its own run
+    # (STEP 0c). Recorded as a finding about the LEDGER: a run that needs
+    # external derivation to be replayed is not fully self-describing.
+    from recoup.simulator.generator import generate_scenarios
+
+    amounts = {
+        s.subscription_id: s.amount_paise
+        for s in generate_scenarios(args.n, seed=args.seed)
+    }
+    unknown_amounts = [k for k in states if k not in amounts]
     views = [
-        LiftView.from_state(s, amount_paise=args.amount_paise)
+        LiftView.from_state(
+            s, amount_paise=amounts.get(s.subscription_id, args.amount_paise)
+        )
         for s in states.values()
         if s.arm is not None
     ]
+
+    def verify_replay_matches_the_run(summary: dict) -> None:
+        """A REPLAY PROVES IT REPRODUCES BEFORE ITS OUTPUT MEANS ANYTHING.
+
+        The lift is computed from `replay()`, not from the runner's own counters.
+        Those are two different readings of the same run, and INC-009 was exactly
+        the case where they disagreed: the runner counted 247 recoveries and
+        replay saw zero, which would have produced a 0.00 pp lift with a tight
+        interval and read as a careful null result.
+
+        That defect was fixed. Nothing checked that it stayed fixed, and nothing
+        would have caught a different disagreement. This raises rather than
+        warning: a warning printed beside a rendered table gets read as a caveat
+        on a result rather than as a reason there is no result.
+        """
+        if not summary.get("arms"):
+            return
+        for arm_name, stats in summary["arms"].items():
+            expected = ArmStats(**stats).recovered
+            got = sum(
+                1 for v in views if v.arm == arm_name and v.recovered_paise > 0
+            )
+            if expected != got:
+                raise SystemExit(
+                    f"REFUSING TO REPORT: the runner counted {expected} "
+                    f"recoveries in the {arm_name!r} arm and replaying the ledger "
+                    f"finds {got}. The lift is computed from the replay, so it "
+                    f"would be a figure about something other than the run that "
+                    f"happened. This is INC-009's shape; see CLAUDE.md on "
+                    f"replays proving they reproduce."
+                )
 
     out = []
 
@@ -99,6 +155,7 @@ def main() -> int:
     summary = {}
     if summary_path.exists():
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        verify_replay_matches_the_run(summary)
         identity = summary.get("model_identity") or {}
         if identity:
             say("## The model")
@@ -246,6 +303,11 @@ def main() -> int:
     say(f"- subscriptions replayed: {len(states)}")
     say(f"- rows attributable to no subscription: {orphans}"
         + ("" if orphans == 0 else " — **these shorten every denominator**"))
+    say(f"- subscriptions whose amount could not be regenerated: "
+        f"{len(unknown_amounts)}"
+        + ("" if not unknown_amounts
+           else f" — **these fell back to a flat {args.amount_paise} paise, so "
+                f"any money figure over them is wrong**"))
     say()
 
     if args.out:

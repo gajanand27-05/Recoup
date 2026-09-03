@@ -905,3 +905,62 @@ Every death has been resumable and no figure has ever been produced from a dead 
 A retry loop that covers one failure mode reads as a retry loop. Ask which exceptions can be
 raised *before* the value you are branching on exists — those bypass every check written in
 terms of it.
+
+---
+
+## INC-013 — The ledger cannot reconstruct its own run
+
+**2026-09-03, found by auditing what a replay needs after the sensitivity sweep nearly reported
+five false sign flips.**
+
+### What the ledger stores, and what a replay needs
+
+| field a faithful replay needs | where it actually comes from |
+|---|---|
+| `channel`, `attempt_no` | the payload ✅ |
+| `day_offset` | **derived** from each row's `ts` relative to that subscription's first row |
+| `is_hard_decline` | **regenerated** from `(n, seed)` — a property of the scenario, not the action |
+| `amount_paise` | **nowhere.** Not stored at all |
+| `reason_code`, `send_at` | not stored |
+
+### The live consequence
+
+`scripts/report.py` built every `LiftView` with `amount_paise=args.amount_paise`, a single CLI
+default of 49,900 applied to all 2,000 subscriptions. The cohort's actual amounts:
+
+```
+29900: 447   49900: 506   79900: 389   99900: 283
+149900: 180  249900: 122  499900: 73
+```
+
+**The default was correct for 506 of 2,000 and wrong for 1,494.**
+
+The recovery *rate* counts subscriptions and is unaffected — the headline +1.45 pp figure never
+depended on it. What did depend on it: `recovered_paise`, the money difference, and its
+bootstrap interval. Those were computed over a constant that is not true of the cohort. They
+are not currently rendered in the report, which is the only reason this did not reach a reader.
+
+### The fix
+
+Amounts are regenerated from `(n, seed)` and matched per subscription. Any subscription whose
+amount cannot be regenerated is **counted and reported** in the completeness section, with the
+consequence stated — it is 0 for this run, and a non-zero would mean money figures over those
+rows are wrong.
+
+### The finding is about the ledger, not the replay
+
+Three of the five fields have to be recovered from outside the ledger. A run that cannot be
+replayed from its own record without regenerating the cohort from a seed is **not fully
+self-describing** — and every derivation is a place a reconstruction can silently diverge, which
+is exactly how the sweep produced five false falsifications an hour earlier.
+
+**Not fixed by widening the payload.** The batch has run; adding fields now would change the
+hash chain's contents for a run already complete, and the figure is pinned to three commits
+already. Recorded as a limitation of this run's ledger, with the derivations made explicit and
+verified in `replay_actions_from_ledger()` rather than left implicit at each call site.
+
+**Lesson kept**
+
+Ask of any append-only record: *could this run be replayed from this alone?* Where the answer
+is no, the missing fields are the places a future reconstruction will quietly differ — and a
+reconstruction that differs still renders a table.
