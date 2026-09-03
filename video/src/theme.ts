@@ -9,6 +9,19 @@
  * The longest is the intent-accuracy sentence at ~250 characters. At 1920px wide
  * with 72px side margins, 34px monospace gives ~92 characters per line, so ~250
  * characters is three lines. Everything is sized against that.
+ *
+ * RAISED 2026-09-03, after watching the render. Every card was using roughly the
+ * top 45% of a 1080p frame and the bottom half was empty — legible fullscreen,
+ * small in a laptop browser tab, which is where this will actually be judged.
+ * The scale is up ~18%, chosen against the tallest cards rather than the
+ * emptiest: Findings (which gained the non-equivalence clause), DayTwo and
+ * Limitations are what set the ceiling.
+ *
+ * `SIZE.terminal` deliberately did NOT move. The veto scene's captured output is
+ * 21 wrapped lines, and its box is now sized by its own text — at 24px it needs
+ * 812px of a ~792px budget once the larger heading is allowed for. Growing the
+ * prose and holding the monospace is the trade the content forces; a smaller
+ * face there is not a compression, because no sentence is being shortened.
  */
 export const WIDTH = 1920;
 export const HEIGHT = 1080;
@@ -33,12 +46,12 @@ export const FONT = {
 
 /** Sized so the longest protected sentence fits whole on one card. */
 export const SIZE = {
-  title: 66,
-  heading: 46,
-  body: 34,
-  small: 27,
+  title: 78,
+  heading: 54,
+  body: 40,
+  small: 32,
   terminal: 24,
-  label: 22,
+  label: 26,
 };
 
 export const MARGIN = 72;

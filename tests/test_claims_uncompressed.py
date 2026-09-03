@@ -509,3 +509,93 @@ def test_the_result_files_are_a_subset_of_the_candidates():
     """A result file outside CANDIDATES would be checked by the result guards and
     not by the A/A or accuracy ones — a split nobody would notice."""
     assert set(RESULT_FILES) <= set(CANDIDATES)
+
+
+# --- 6. the null's two halves must sit on the SAME CARD ---------------------------
+#
+# A video is read one card at a time. "The interval spans zero" alone is what a
+# reader compresses into "there is no difference" -- the false STRONGER claim --
+# and the opening card carried exactly that while the full sentence sat on the
+# dedicated finding-1 card sixty seconds later. Both satisfy "the source contains
+# the clause"; only one is seen by someone who watches thirty seconds.
+#
+# So this checks per CARD, not per file. It walks every scene the source defines
+# rather than naming the ones that happen to make the claim today.
+
+import video_cards  # noqa: E402
+
+_SPANS_ZERO = re.compile(r"(?:interval\s+)?spans\s+zero", re.IGNORECASE)
+
+
+def _cards_asserting_the_interval_spans_zero(cards):
+    return [c for c in cards if _SPANS_ZERO.search(c.text)]
+
+
+@pytest.mark.parametrize("name", [c.name for c in video_cards.cards()])
+def test_a_video_card_never_says_spans_zero_without_the_non_equivalence_clause(name):
+    card = next(c for c in video_cards.cards() if c.name == name)
+    if not _SPANS_ZERO.search(card.text):
+        pytest.skip(f"{name} does not make the claim")
+    assert _NON_EQUIVALENCE.search(card.text), (
+        f"video card {name!r} states that the interval spans zero without the "
+        f"clause distinguishing that from equivalence. Alone it compresses to "
+        f"'there is no difference', which is a stronger claim than this run "
+        f"supports, and a card is read on its own.\n\n{card.text}"
+    )
+
+
+def test_at_least_one_video_card_actually_makes_the_spans_zero_claim():
+    """A test that passes by finding nothing must first be shown able to find
+    something. If no card asserts it, the guard above skips every scene and is
+    green over a video that says nothing at all."""
+    asserting = _cards_asserting_the_interval_spans_zero(video_cards.cards())
+    assert asserting, (
+        "no video card asserts that the interval spans zero, so the pairing "
+        "guard is vacuous. Either the null is no longer stated on screen -- "
+        "which is a much bigger problem -- or the anchor pattern has drifted."
+    )
+
+
+def test_the_pairing_guard_rejects_a_card_with_the_clause_stripped():
+    """PLANT. Strips the non-equivalence clause out of the opening card and
+    confirms the guard fires, rather than reasoning that it would.
+
+    Runs on every check, so it cannot rot into a claim about a source that has
+    since changed.
+    """
+    text = video_cards.source()
+    stripped = text.replace(
+        " — which is not`,\n"
+        "        `    the same as there being no difference. It does not establish`,\n"
+        "        `    that the two arms are equivalent.",
+        ".",
+    )
+    assert stripped != text, (
+        "the plant no longer matches the opening card's wording, so this guard "
+        "has not been shown to fire against the text it protects"
+    )
+
+    planted = video_cards.cards(stripped)
+    offenders = [
+        c.name
+        for c in _cards_asserting_the_interval_spans_zero(planted)
+        if not _NON_EQUIVALENCE.search(c.text)
+    ]
+    assert "Findings" in offenders, (
+        "stripping the non-equivalence clause from the opening card did NOT "
+        "make the guard fire. It is testing something other than the pairing."
+    )
+
+
+def test_the_scenes_array_and_the_defined_scenes_agree():
+    """Walk the registry, do not enumerate it. A scene defined but never placed
+    in SCENES renders nothing and would satisfy every guard above for free; a
+    scene in SCENES but not found by the parser is invisible to all of them."""
+    defined = [c.name for c in video_cards.cards()]
+    rendered = video_cards.declared_scene_order()
+    assert defined == rendered, (
+        f"the scenes defined in the source and the scenes SCENES renders have "
+        f"diverged.\n  defined:  {defined}\n  rendered: {rendered}\n"
+        f"Every card guard walks the defined list; anything only in one of these "
+        f"is either unchecked or unrendered."
+    )

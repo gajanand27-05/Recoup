@@ -78,7 +78,9 @@
     "p_value": 0.483,
     "significant": false,
     "mde_pp": 6.24,
-    "min_arm": 965
+    "mde_basis": "achieved at 1,035 / 965, harmonic-mean effective N 998",
+    "min_arm": 965,
+    "harmonic_n": 998
   },
   "power_ceiling": {
     "schedules": [
@@ -141,7 +143,9 @@
     "best_pp": 35.36,
     "control_pp": 33.83,
     "ceiling_pp": 1.53,
-    "mde_pp": 6.24,
+    "mde_pp": 6.23,
+    "mde_basis": "pre-registered at 1,000 per arm",
+    "achieved_mde_pp": 6.24,
     "ratio": 4.1,
     "n_needed": 33000.0,
     "alpha": 0.05,
@@ -159,7 +163,8 @@
       "fallbacks": 0,
       "recovered": 310,
       "recovered_paise": 31229000,
-      "spend_paise": 52236
+      "spend_paise": 52236,
+      "fallback_rate_pct": 0.0
     },
     "treatment": {
       "subscriptions": 965,
@@ -171,7 +176,8 @@
       "fallbacks": 0,
       "recovered": 303,
       "recovered_paise": 27839700,
-      "spend_paise": 43845
+      "spend_paise": 43845,
+      "fallback_rate_pct": 0.0
     }
   },
   "accuracy": {

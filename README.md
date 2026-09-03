@@ -108,15 +108,17 @@ configuration.
 | control | 310 | 1,035 | 29.95% |
 | treatment | 303 | 965 | 31.40% |
 
-**+1.45 pp · 95% CI [−2.59, +5.49] pp · p = 0.4830 · MDE 6.24 pp · N = 2,000**
+**+1.45 pp · 95% CI [−2.59, +5.49] pp · p = 0.4830 · achieved MDE 6.24 pp · N = 2,000**
 
-The interval spans zero. An observed +1.45 pp sits well inside what a design powered for
-6.24 pp can resolve.
+The interval spans zero. An observed +1.45 pp sits well inside what this run, powered for
+6.24 pp at the arms it actually produced, can resolve.
 
 **That is not the same as there being no difference.** This run rules out effects *larger* than
 the MDE at the stated power. It does **not** rule out a real effect smaller than 6.24 pp, and it
 does **not** establish that the two arms are equivalent — a null result and a demonstration of
 equivalence are different claims, and only the first was run.
+
+> **Two MDEs, and they are different quantities (A-029).** **6.24 pp** is the **achieved** MDE — the harmonic-mean effective N of the arms that actually ran, 1,035 / 965, effective N 998. **6.23 pp** is the **pre-registered** MDE at the designed 1,000 per arm, pinned in [`EXPERIMENT.md`](EXPERIMENT.md)'s power table before the run. The result of *this run* is quoted against the achieved figure; claims about what the *design* could ever detect are quoted against the pre-registered one, which is also the smaller of the two and therefore the weaker version of that claim.
 
 ### The control was made strong on purpose, before any number existed
 
@@ -189,8 +191,9 @@ Computed over the frozen response curve, the difference between the most aggress
 | `(0,2,5,9,14)` | 0.3176 ← the original plan's schedule |
 | `(0,3,7,15,30)` | 0.2897 |
 
-**The minimum detectable effect is 6.23 pp. The largest difference any legitimate schedule
-change can produce is 1.53 pp — roughly a quarter of it.**
+**The pre-registered minimum detectable effect is 6.23 pp, at the designed 1,000 per arm.
+The largest difference any legitimate schedule change can produce is 1.53 pp — roughly a
+quarter of it.**
 
 So the experiment was **structurally incapable of detecting the intervention it was built to
 test**. A null was close to the *expected* outcome for any agent operating on schedule, channel
@@ -206,7 +209,7 @@ softening it would be exactly the compression this project spends its guards pre
 **This was computable from the frozen curve on Day 2.** `SCHEDULE_ALTERNATIVES` and their
 cumulative recoveries have been in `baseline/fixed.py` since Task 8 — the 1.53 pp gap is
 arithmetic over numbers that were already committed, and `mde_at_n()` has been able to return
-6.23 pp for just as long. Nothing compared the two.
+the pre-registered 6.23 pp for just as long. Nothing compared the two.
 
 It was found on Day 6, **after** the harness, the control arm, the pre-registration, three
 restarts of the batch and 2,000 subscriptions of provider quota — and then only as a side

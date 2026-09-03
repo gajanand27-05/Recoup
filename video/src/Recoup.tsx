@@ -29,10 +29,18 @@ const pp = (n: number) => `${n > 0 ? "+" : ""}${n.toFixed(2)} pp`;
 
 const Findings: React.FC = () => (
   <Slide kicker="recoup — post-halt subscription payment recovery" title="Two findings.">
+    {/* B1: "the interval spans zero" never appears here without the
+        non-equivalence clause. Alone it is what a reader compresses into "no
+        difference", which is the false STRONGER claim — and someone who watches
+        thirty seconds sees only this card. Both halves sit in one Sentence, so
+        they are simultaneously visible and cannot drift apart in an edit.
+        tests/test_claims_uncompressed.py enforces the pairing. */}
     <Sentence
       lines={[
         `1.  The agent did not beat the control: ${pp(f.lift.diff_pp)}, 95% CI`,
-        `    [${f.lift.ci_low_pp.toFixed(2)}, ${f.lift.ci_high_pp.toFixed(2)}] pp. The interval spans zero.`,
+        `    [${f.lift.ci_low_pp.toFixed(2)}, ${f.lift.ci_high_pp.toFixed(2)}] pp. The interval spans zero — which is not`,
+        `    the same as there being no difference. It does not establish`,
+        `    that the two arms are equivalent.`,
       ]}
       delay={6}
     />
@@ -40,7 +48,7 @@ const Findings: React.FC = () => (
       lines={[
         `2.  The experiment could not have detected what it was testing.`,
         `    The best schedule change available is worth ${f.power_ceiling.ceiling_pp} pp.`,
-        `    It was powered to detect ${f.power_ceiling.mde_pp} pp — ${f.power_ceiling.ratio}× larger.`,
+        `    The design was powered to detect ${f.power_ceiling.mde_pp} pp — ${f.power_ceiling.ratio}× larger.`,
       ]}
       delay={30}
       color={COLORS.warn}
@@ -68,8 +76,17 @@ const Ceiling: React.FC = () => (
       ))}
     </div>
     <Row gap={96}>
+      {/* A-029: finding 2 is a claim about what the DESIGN could ever detect,
+          so it takes the PRE-REGISTERED MDE at 1,000 per arm — the number that
+          existed on Day 2, and the smaller of the two, so the gap it shows is
+          the weaker version of our own indictment. Finding 1's card carries the
+          ACHIEVED figure at the split that actually ran. Both are labelled
+          because four cards showed an MDE and nothing said which was which. */}
       <Stat label="best minus control" value={`${f.power_ceiling.ceiling_pp} pp`} color={COLORS.warn} />
-      <Stat label="minimum detectable effect" value={`${f.power_ceiling.mde_pp} pp`} />
+      <Stat
+        label={`MDE, ${f.power_ceiling.mde_basis}`}
+        value={`${f.power_ceiling.mde_pp} pp`}
+      />
       <Stat label="N needed to close the gap" value={f.power_ceiling.n_needed.toLocaleString()} />
     </Row>
     <Sentence
@@ -87,15 +104,18 @@ const DayTwo: React.FC = () => (
     <Sentence
       lines={[
         "The schedules and their recoveries have been in baseline/fixed.py since",
-        `Task 8. mde_at_n() has returned ${f.aa.bound_pp} pp for just as long. The gap is`,
-        "arithmetic over numbers that were already committed.",
+        // the PRE-REGISTERED MDE, not aa.bound_pp. Numerically identical because
+        // both sit at 1,000 per arm, but that one is the A/A's own power: right
+        // number, wrong provenance, and it would have followed the A/A's N (A-029).
+        `Task 8. mde_at_n() has returned ${f.power_ceiling.mde_pp} pp for just as long. The gap`,
+        "is arithmetic over numbers that were already committed.",
       ]}
       delay={8}
     />
     <Sentence
       lines={[
         "It was found on Day 6 — after the harness, the control arm, the",
-        "pre-registration, three restarts and 2,000 subscriptions of provider",
+        `pre-registration, three restarts and ${f.run.planned_n.toLocaleString()} subscriptions of provider`,
         "quota — and then only as a side effect of asking whether the A/A could",
         "detect anything at all.",
       ]}
@@ -159,7 +179,7 @@ const Null: React.FC = () => (
     </Row>
     <Sentence
       lines={[
-        `The interval spans zero, at a minimum detectable effect of ${f.lift.mde_pp} pp.`,
+        `The interval spans zero, at an MDE of ${f.lift.mde_pp} pp — ${f.lift.mde_basis}.`,
         "That is not the same as there being no difference: this rules out effects",
         "larger than the MDE at the stated power. It does not rule out a smaller",
         "real effect, and it does not establish that the arms are equivalent.",
@@ -207,7 +227,7 @@ const Ordering: React.FC = () => (
         `At 12 of ${f.run.planned_n.toLocaleString()} subscriptions — all three outcome rules pre-registered, including that a control win would be reported as the result.`,
         "Before the batch — schema violations declared to pull measured lift toward null.",
         "Before the figure existed — the fallback counter verified live by five forced schema violations, each driving it from 0% to 100%.",
-        `After the run — fallback rate ${(100 * f.arms.treatment.fallbacks) / Math.max(1, f.arms.treatment.fallbacks + f.arms.treatment.model_decided)}% across ${f.arms.treatment.model_decided.toLocaleString()} model decisions.`,
+        `After the run — fallback rate ${f.arms.treatment.fallback_rate_pct}% across ${f.arms.treatment.model_decided.toLocaleString()} model decisions.`,
       ]}
     />
     <Sentence
@@ -243,7 +263,7 @@ const Veto: React.FC = () => (
   <Slide kicker="the policy engine vetoes the agent" title="A model reaching for persuasion.">
     {/* 21 wrapped lines: the only scene whose capture needs a smaller face to
         clear 1080 once the box is sized by its own text. */}
-    <Terminal text={captured.demoFailure} charsPerFrame={14} fontSize={21} />
+    <Terminal text={captured.demoFailure} charsPerFrame={14} fontSize={22} />
   </Slide>
 );
 
@@ -300,13 +320,15 @@ const Limitations: React.FC = () => (
   <Slide kicker="limitations" title="What this does not show.">
     <Bullets
       items={[
-        `The intervention's ceiling is ${f.power_ceiling.ceiling_pp} pp against an MDE of ${f.power_ceiling.mde_pp} pp — finding 2, and the reason the null is weak evidence about the agent.`,
+        `The intervention's ceiling is ${f.power_ceiling.ceiling_pp} pp against an MDE of ${f.power_ceiling.mde_pp} pp ${f.power_ceiling.mde_basis} — finding 2, and the reason the null is weak evidence about the agent.`,
         "The counterfactual is assumed, not measured. Nothing published gives a post-halt, no-outreach recovery rate.",
         "10 of 17 frozen simulator parameters are assumptions with declared sweep ranges.",
         "The subscription context is synthetic; the payment links are real. Subscriptions is not enabled on the account.",
         "On this provider the JSON schema is requested, not enforced — output is validated at the boundary instead.",
         "The ledger cannot fully reconstruct its own run: three of five replay fields come from outside it.",
-        "One sign flip in the sweep, taking the lift to −0.10 pp — pre-registered as falsifying, and a −0.10 pp swing on an interval that already spans zero.",
+        // "already spans zero" is the null again, so it carries the null's other
+        // half on this card too — a bullet is read alone (B2).
+        "One sign flip in the sweep, taking the lift to −0.10 pp — pre-registered as falsifying, and a −0.10 pp swing on an interval that already spans zero, which does not establish equivalence either.",
         "Declared not-run: the model-backed half of the adversarial injection eval.",
       ]}
       size={SIZE.small}

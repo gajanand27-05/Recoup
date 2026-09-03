@@ -23,6 +23,7 @@ by running something, it does not go on screen.
 """
 
 import json
+import re
 import sqlite3
 import sys
 from pathlib import Path
@@ -51,6 +52,56 @@ DATE_CORRECT, DATE_N = 10, 11
 
 #: MEASURED 2026-08-31, the component A/A. Run once; not re-run (EXPERIMENT.md).
 AA_A, AA_B, AA_N_PER_ARM = 513, 510, 1000
+
+#: The PRE-REGISTERED design: 1,000 per arm, pinned in EXPERIMENT.md's power table
+#: before the run. Distinct from the ACHIEVED MDE, which is computed below at the
+#: harmonic-mean effective N of the arms that actually ran (1,035 / 965) and was
+#: not knowable until they had. See A-029: four cards showed an MDE, one said 6.23
+#: and three said 6.24, and nothing said why.
+PREREG_N_PER_ARM = 1000
+
+
+def _preregistered_mde_pp() -> float:
+    """The pre-registered MDE, computed here and CHECKED against the figure
+    EXPERIMENT.md pins in its own power table.
+
+    Two producers for one number. The Day 2 card used to read this from
+    `aa.bound_pp` -- numerically identical, because the A/A also runs 1,000 per
+    arm, but that is the A/A's power and not the main design's. Right number,
+    wrong provenance: had the A/A's N ever moved, a claim about the MAIN design
+    would have silently followed it.
+
+    Raises rather than warns. A caveat printed beside a rendered figure is read
+    as a note about the result, not as a reason there is no result.
+    """
+    computed = round(mde_at_n(BASELINE_P1, PREREG_N_PER_ARM) * 100, 2)
+
+    text = (REPO / "EXPERIMENT.md").read_text(encoding="utf-8")
+    # EXPERIMENT.md writes the N with a thousands separator: `| **1,000** |`.
+    # The first pattern here spelled it `1000` and so matched nothing -- it
+    # raised the "not pinned" error on the untampered file, which reads exactly
+    # like a guard doing its job. It was caught by planting a DISAGREEMENT and
+    # watching the wrong message come back.
+    row = re.search(
+        r"^\|\s*\*\*%s\*\*\s*\|[^|]*\|\s*\*\*([\d.]+)\s*pp\*\*"
+        % re.escape(f"{PREREG_N_PER_ARM:,}"),
+        text,
+        re.MULTILINE,
+    )
+    if row is None:
+        raise SystemExit(
+            f"EXPERIMENT.md no longer pins an MDE for {PREREG_N_PER_ARM} per arm in its "
+            f"power table. The pre-registered figure has one producer again, so it is "
+            f"not checked; fix the table or the pattern rather than rendering it."
+        )
+    pinned = float(row.group(1))
+    if pinned != computed:
+        raise SystemExit(
+            f"pre-registered MDE disagrees: mde_at_n(p1={BASELINE_P1}, "
+            f"n={PREREG_N_PER_ARM}) = {computed} pp, EXPERIMENT.md pins {pinned} pp. "
+            f"One of the two is wrong and the video will not be built over it."
+        )
+    return computed
 
 
 def _cumulative_recovery(schedule) -> float:
@@ -109,7 +160,12 @@ def main() -> int:
     best = max(schedules, key=lambda s: s["recovery"])
     control_schedule = next(s for s in schedules if s["is_control"])
     ceiling_pp = round((best["recovery"] - control_schedule["recovery"]) * 100, 2)
+
+    # ACHIEVED: what THIS run can see, at the split that actually happened.
+    # PRE-REGISTERED: what the DESIGN was ever able to see. A-029 fixes which
+    # claim takes which -- finding 1 the achieved, finding 2 the pre-registered.
     mde_pp = round(mde_at_n(BASELINE_P1, harmonic) * 100, 2)
+    prereg_mde_pp = _preregistered_mde_pp()
 
     intent_lo, intent_hi = wilson_interval(INTENT_CORRECT, INTENT_N)
     date_lo, date_hi = wilson_interval(DATE_CORRECT, DATE_N)
@@ -136,20 +192,43 @@ def main() -> int:
             "ci_high_pp": round(lift.diff_ci_pp[1], 2),
             "p_value": round(lift.p_value, 4),
             "significant": lift.is_significant,
+            # ACHIEVED, at the arms that ran. Finding 1's number.
             "mde_pp": mde_pp,
+            "mde_basis": f"achieved at {lift.control.n:,} / {lift.treatment.n:,}, "
+                         f"harmonic-mean effective N {harmonic:,}",
             "min_arm": per_arm,
+            "harmonic_n": harmonic,
         },
         "power_ceiling": {
             "schedules": schedules,
             "best_pp": round(best["recovery"] * 100, 2),
             "control_pp": round(control_schedule["recovery"] * 100, 2),
             "ceiling_pp": ceiling_pp,
-            "mde_pp": mde_pp,
-            "ratio": round(mde_pp / ceiling_pp, 1),
-            "n_needed": round(N * (mde_pp / ceiling_pp) ** 2, -3),
+            # PRE-REGISTERED, at 1,000 per arm. Finding 2's number: the claim is
+            # about what the DESIGN could ever detect, and it is the smaller of
+            # the two, so it is also the weaker version of our own indictment.
+            "mde_pp": prereg_mde_pp,
+            "mde_basis": f"pre-registered at {PREREG_N_PER_ARM:,} per arm",
+            "achieved_mde_pp": mde_pp,
+            "ratio": round(prereg_mde_pp / ceiling_pp, 1),
+            "n_needed": round(N * (prereg_mde_pp / ceiling_pp) ** 2, -3),
             "alpha": DEFAULT_ALPHA, "power": DEFAULT_POWER, "baseline_p1": BASELINE_P1,
         },
-        "arms": summary["arms"],
+        # The fallback rate used to be computed in the Remotion source, inline in
+        # a caption. That is a producer living in the view layer: it renders a
+        # number nothing else can check, and an unrounded float would have gone
+        # on screen the moment it stopped being exactly zero (A-027).
+        "arms": {
+            arm: {
+                **counts,
+                "fallback_rate_pct": round(
+                    100 * counts["fallbacks"]
+                    / max(1, counts["fallbacks"] + counts["model_decided"]),
+                    2,
+                ),
+            }
+            for arm, counts in summary["arms"].items()
+        },
         "accuracy": {
             "intent": {"correct": INTENT_CORRECT, "n": INTENT_N,
                        "pct": round(100 * INTENT_CORRECT / INTENT_N, 1),
@@ -175,7 +254,9 @@ def main() -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     print(f"wrote {out}")
-    print(f"  lift {data['lift']['diff_pp']:+.2f} pp, MDE {mde_pp} pp")
+    print(f"  lift {data['lift']['diff_pp']:+.2f} pp")
+    print(f"  MDE {mde_pp} pp achieved ({data['lift']['mde_basis']})")
+    print(f"  MDE {prereg_mde_pp} pp pre-registered, checked against EXPERIMENT.md")
     print(f"  ceiling {ceiling_pp} pp -> ratio {data['power_ceiling']['ratio']}x, "
           f"n_needed {data['power_ceiling']['n_needed']:,.0f}")
     return 0

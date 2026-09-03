@@ -98,21 +98,26 @@ That is a property of this model on this task and should not be assumed to hold 
 ### The result: no detected difference at this N
 
 **The interval spans zero.** This run does not distinguish the agent from the control, at an
-MDE of **6.24 pp**.
+**achieved** MDE of **6.24 pp** — at the arms that ran, 1,035 / 965 (harmonic-mean effective
+N 998).
 
 **That is not the same as there being no difference.** The run rules out effects *larger* than
 the MDE at the stated power. It does **not** rule out a real effect smaller than 6.24 pp, and
 it does **not** establish that the arms are equivalent — a null and a demonstration of
 equivalence are different claims, and only the first was run.
 
+
 Reported as pre-registered in [`EXPERIMENT.md`](EXPERIMENT.md) Addendum 3, written at
 12/2,000 before any number existed. Outcome 3 says exactly this: *no detected difference at
 this N, with the MDE stated* — **not** "trending positive", and **not** re-run at larger N to
 chase significance.
 
-The MDE at N = 2,000 is **6.24 pp**. An effect of +1.45 pp is well inside the noise this design
-can resolve, so the honest statement is that the experiment did not detect a difference — not
-that there is none.
+The achieved MDE at N = 2,000 is **6.24 pp**. An effect of +1.45 pp is well inside the noise this design
+can resolve, so the honest statement is that the experiment did not detect a difference. That
+is not the same as there being no difference: the run does **not** rule out a smaller real
+effect and does **not** establish that the arms are equivalent.
+
+> **Two MDEs, and they are different quantities (A-029).** **6.24 pp** is the **achieved** MDE — the harmonic-mean effective N of the arms that actually ran, 1,035 / 965, effective N 998. **6.23 pp** is the **pre-registered** MDE at the designed 1,000 per arm, pinned in [`EXPERIMENT.md`](EXPERIMENT.md)'s power table before the run. The result of *this run* is quoted against the achieved figure; claims about what the *design* could ever detect are quoted against the pre-registered one, which is also the smaller of the two and therefore the weaker version of that claim.
 
 ### Why the usual excuse is unavailable
 
@@ -154,7 +159,7 @@ declared range.
 
 `EXPERIMENT.md` pre-registers a sign flip as falsifying, so it is reported rather than
 narrowed away. In context the flip is −0.10 pp against a measurement whose interval already
-spans zero at an MDE of 6.24 pp, so it is consistent with the headline finding — which does
+spans zero at an achieved MDE of 6.24 pp, so it is consistent with the headline finding — which does
 not establish equivalence either — rather than a reversal of a real effect. Both statements
 are true and both are here.
 
