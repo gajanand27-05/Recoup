@@ -368,3 +368,100 @@ def test_a_missing_checkpoint_says_so_rather_than_dropping_the_section(tmp_path)
 
     assert read_checkpoint(tmp_path / "absent.jsonl") == []
     assert fallback_series([]) == []
+
+
+# --- "0% fallback" asserts the counter RAN, not that it is absent ------------------
+
+
+@pytest.mark.parametrize(
+    "label,payload",
+    [
+        ("model returns nothing", None),
+        ("model returns an empty object", {}),
+        ("a template it invented", {"action_type": "send_message",
+                                    "template_id": "TPL_MADE_UP",
+                                    "hours_from_now": 0, "variables": {},
+                                    "rationale": "x"}),
+        ("hours out of range", {"action_type": "send_message",
+                                "template_id": "TPL_RECOUP_WA_001",
+                                "hours_from_now": 100000, "variables": {},
+                                "rationale": "x"}),
+        ("unknown action_type", {"action_type": "teleport",
+                                 "template_id": "TPL_RECOUP_WA_001",
+                                 "hours_from_now": 0, "variables": {},
+                                 "rationale": "x"}),
+    ],
+)
+def test_the_fallback_counter_moves_off_zero_when_the_schema_is_violated(
+    tmp_path, label, payload
+):
+    """A metric reading 0% is indistinguishable from a metric not being written.
+
+    The run's fallback rate dropped from ~4.7% to 0% when the planner stopped
+    accepting facts from the model (`d6d2e87`), which is a plausible causal story
+    and therefore exactly the shape that should not be believed on the strength
+    of being plausible. So the counter is forced off zero on the live runner path
+    rather than reasoned about.
+    """
+    from pathlib import Path
+
+    from recoup.batch.runner import BatchRunner
+    from recoup.execute.sim import SimTransport
+
+    class _Model:
+        name = "gpt-oss:120b"
+
+        def classify_reply(self, text, today):  # pragma: no cover
+            raise AssertionError("wrong role")
+
+        def propose_action(self, system, prompt):
+            return payload
+
+    repo = Path(__file__).resolve().parents[1]
+    runner = BatchRunner(
+        db_path=str(tmp_path / "f.db"),
+        rules_path=str(repo / "src" / "recoup" / "policy" / "rules.yaml"),
+        run_id="fb", seed=7, transport=SimTransport(seed=7),
+        llm_client=_Model(), checkpoint_dir=str(tmp_path / "cp"),
+    )
+    summary = runner.run(40, progress_every=0)
+    treatment = ArmStats(**summary.arms[TREATMENT])
+
+    assert treatment.fallbacks > 0, (
+        f"{label!r} produced no fallbacks — the counter is not being written, so "
+        f"a 0% rate would mean nothing"
+    )
+    assert treatment.fallback_rate == 1.0
+    assert treatment.actions_sent > 0, "a fallback must still SEND; it is an action"
+
+
+def test_a_well_formed_model_produces_a_genuine_zero(tmp_path):
+    """The control case for the test above. Without it, every assertion could be
+    satisfied by a counter that is always non-zero."""
+    from pathlib import Path
+
+    from recoup.batch.runner import BatchRunner
+    from recoup.execute.sim import SimTransport
+
+    class _Good:
+        name = "gpt-oss:120b"
+
+        def classify_reply(self, text, today):  # pragma: no cover
+            raise AssertionError("wrong role")
+
+        def propose_action(self, system, prompt):
+            return {"action_type": "send_message",
+                    "template_id": "TPL_RECOUP_WA_001",
+                    "hours_from_now": 0, "variables": {}, "rationale": "ok"}
+
+    repo = Path(__file__).resolve().parents[1]
+    runner = BatchRunner(
+        db_path=str(tmp_path / "g.db"),
+        rules_path=str(repo / "src" / "recoup" / "policy" / "rules.yaml"),
+        run_id="ok", seed=7, transport=SimTransport(seed=7),
+        llm_client=_Good(), checkpoint_dir=str(tmp_path / "cp"),
+    )
+    treatment = ArmStats(**runner.run(40, progress_every=0).arms[TREATMENT])
+    assert treatment.model_decided > 0
+    assert treatment.fallbacks == 0
+    assert treatment.fallback_rate == 0.0

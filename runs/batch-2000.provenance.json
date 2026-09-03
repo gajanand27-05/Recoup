@@ -41,6 +41,12 @@
       "short": "7dbe2c0",
       "subscription_index_range": "1154-2000",
       "note": "resumed 09:47 after the quota reset"
+    },
+    {
+      "commit": "25ad9c4",
+      "short": "25ad9c4",
+      "subscription_index_range": "1355-2000",
+      "note": "resumed after INC-012 -- a single httpx.ReadTimeout killed the run at 1354/2000 because the retry loop covered 429 responses only. Transient network faults are now retried."
     }
   ],
   "concurrency_schedule": [
@@ -56,6 +62,11 @@
       "value": 2,
       "subscription_index_range": "1154-2000",
       "why": "lower burn rate to reach further before the next quota wall"
+    },
+    {
+      "value": 2,
+      "subscription_index_range": "1355-2000",
+      "why": "unchanged from the previous segment"
     }
   ],
   "equivalence_demonstrated": {
@@ -64,7 +75,8 @@
     "results": {
       "concurrency 1 vs 2": "IDENTICAL (176 rows)",
       "concurrency 1 vs 4": "IDENTICAL (176 rows)",
-      "pin 487fc45 vs 7dbe2c0 (git worktree)": "IDENTICAL (176 rows)"
+      "pin 487fc45 vs 7dbe2c0 (git worktree)": "IDENTICAL (176 rows)",
+      "pin 487fc45 vs 25ad9c4 (git worktree)": "IDENTICAL (176 rows), re-run after adding the third pin"
     },
     "why_reachability_was_not_enough": "The three files changed between the pins -- cli.py, demo.py, eval/sensitivity.py -- are none of the 18 modules in the runner's transitive import closure. That is an argument about code REACHABILITY, not a demonstration of output equivalence, and this build has a rule about the difference (INC-011). So it was run under both pins and diffed.",
     "why_concurrency_invariance_holds": "Draws are keyed on (seed, subscription_id, attempt_no, day_offset) rather than taken from a shared RNG whose position depends on interleaving. That keying was introduced precisely so this is demonstrable; it is now pinned by tests/test_batch_runner.py::test_concurrency_does_not_change_the_outcome, which compares OUTCOMES and not only reference_ids, and which fails on all three concurrency values when the shared RNG is restored."
