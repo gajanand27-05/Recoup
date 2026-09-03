@@ -81,9 +81,15 @@ def _near(text: str, anchor: re.Pattern, required: re.Pattern) -> list[str]:
     for match in anchor.finditer(text):
         lo = max(0, match.start() - PROXIMITY_CHARS)
         hi = min(len(text), match.end() + PROXIMITY_CHARS)
-        if not required.search(text[lo:hi]):
-            line = text[: match.start()].count("\n") + 1
-            orphans.append(f"line {line}: {match.group(0)!r}")
+        if required.search(text[lo:hi]):
+            continue
+        # A phrase quoted AS WRONG is not an assertion of it. Without this the
+        # guard fires on the documents that exist to warn against the very
+        # compression it is checking for.
+        if _is_disavowed(text, match.start(), match.end()):
+            continue
+        line = text[: match.start()].count("\n") + 1
+        orphans.append(f"line {line}: {match.group(0)!r}")
     return orphans
 
 
@@ -113,10 +119,23 @@ _NEGATION = re.compile(r"\bnot\b|\bnever\b|\bwrong\b", re.IGNORECASE)
 # matched nothing, so every disavowal read as an assertion. grep renders 0x08
 # invisibly, so the file looked correct; printing .pattern is what showed it.
 # Asserted at import rather than trusted:
-assert "\b" not in _NEGATION.pattern, (
-    "the negation pattern holds a literal backspace instead of a word boundary; "
-    "it would match nothing and every disavowal would read as a claim"
-)
+def _assert_no_literal_backspaces() -> None:
+    """EVERY compiled pattern in this module, not one named variable.
+
+    This has now happened twice. The first version of this check named
+    `_NEGATION` and therefore sat and watched while the same shell heredoc did
+    the same thing to `_STRONG_DISAVOWAL` an hour later — a guard that covers one
+    instance of the failure it exists for.
+    """
+    import sys as _sys
+
+    for name, value in vars(_sys.modules[__name__]).items():
+        if isinstance(value, re.Pattern) and chr(8) in value.pattern:
+            raise AssertionError(
+                f"{name} holds a literal backspace instead of a word boundary; it "
+                f"would match nothing and every check using it would pass "
+                f"vacuously. Pattern: {value.pattern!r}"
+            )
 
 #: ASSUMPTION: a disavowal only governs a phrase if it is this close. 48 chars is
 #: about half a line. Range 24..96.
@@ -132,10 +151,29 @@ DISAVOWAL_CHARS = 48
 #: quotes to point at it. An unquoted phrase reads as the document's own voice,
 #: so it needs a strong marker rather than a stray negation.
 _STRONG_DISAVOWAL = re.compile(
-    r"(?:short\s+)?false\s+version|rather\s+than|instead\s+of|"
+    # WRONGNESS markers only. "rather than" and "instead of" were in this list
+    # and were far too loose: "fixed in advance rather than after seeing the
+    # number" sat one sentence away from the REAL sign-flip report and exempted
+    # it, so the guard passed vacuously on the exact text it exists to check.
+    # Same failure as the 160-char "not" window, one level up.
+    r"(?:short\s+)?false\s+version|\bfalse\b|\bspurious\b|"
     r"do\s+not\s+(?:say|let|use)|never\s+say",
     re.IGNORECASE,
 )
+
+#: Files that REPORT a result. The result guards apply to these.
+#:
+#: `EXPERIMENT.md` is a pre-registration: it states the RULE ("a sweep that flips
+#: the sign falsifies") before any magnitude existed, and demanding the magnitude
+#: beside it would be demanding a number the document could not have had.
+#: `INCIDENTS.md` is a log of defects, not a report of findings.
+RESULT_FILES = ("README.md", "EVAL_RESULTS.md", "VIDEO.md", "SUBMISSION.md")
+
+
+def _present_results() -> list[str]:
+    return [n for n in RESULT_FILES if (REPO / n).exists()]
+
+
 _QUOTE_CHARS = "\"'`*“”‘’"
 
 
@@ -311,3 +349,113 @@ def test_a_strong_marker_disavows_even_unquoted():
     text = "Do not say the classifier is 94% accurate."
     match = re.search(r"94%\s+accurate", text, re.IGNORECASE)
     assert _is_disavowed(text, match.start(), match.end())
+
+
+# --- 3. the null must not be dressed up as a near-miss ----------------------------
+
+#: Framings that imply a positive result was nearly reached. The interval spans
+#: zero; there is no direction to report, and language that supplies one is
+#: reporting something the measurement does not contain.
+_NEAR_MISS = (
+    r"trending\s+positive",
+    r"directionally\s+(favourable|favorable|positive)",
+    r"\bsuggestive\b",
+    r"promising\s+(signal|direction|result)",
+    r"just\s+(short|shy)\s+of\s+significan",
+    r"approaching\s+significance",
+    r"nearly\s+significant",
+    r"marginally\s+significant",
+)
+
+
+@pytest.mark.parametrize("name", _present())
+def test_no_document_dresses_the_null_up_as_a_near_miss(name):
+    text = _read(name)
+    offenders = []
+    for pattern in _NEAR_MISS:
+        for match in re.finditer(pattern, text, re.IGNORECASE):
+            if _is_disavowed(text, match.start(), match.end()):
+                continue
+            line = text[: match.start()].count("\n") + 1
+            offenders.append(f"line {line}: {match.group(0)!r}")
+    assert not offenders, (
+        f"{name} implies a positive result was nearly reached:\n  "
+        + "\n  ".join(offenders)
+        + "\nThe interval spans zero. There is no direction to report, and "
+        "language that supplies one reports something the measurement does not "
+        "contain."
+    )
+
+
+# --- 4. the null does not establish equivalence -----------------------------------
+
+_NULL_CLAIM = re.compile(
+    r"did\s+not\s+detect\s+a\s+difference|no\s+detected\s+difference", re.IGNORECASE
+)
+_NON_EQUIVALENCE = re.compile(
+    r"not\s+the\s+same\s+as\s+there\s+being\s+no\s+difference"
+    r"|does\s+not\s+(?:rule\s+out|establish)",
+    re.IGNORECASE,
+)
+
+
+@pytest.mark.parametrize("name", _present_results())
+def test_the_null_never_appears_without_its_non_equivalence_clause(name):
+    """'We did not detect a difference' compresses to 'there is no difference',
+    which is a different and much stronger claim that this run cannot support."""
+    orphans = _near(_read(name), _NULL_CLAIM, _NON_EQUIVALENCE)
+    assert not orphans, (
+        f"{name} states the null without the clause distinguishing it from "
+        f"equivalence:\n  " + "\n  ".join(orphans)
+    )
+
+
+@pytest.mark.parametrize("name", _present_results())
+def test_the_null_carries_the_mde_it_could_not_resolve_below(name):
+    """A null without its power is a null about nothing."""
+    orphans = _near(_read(name), _NULL_CLAIM, re.compile(r"6\.2[34]"))
+    assert not orphans, (
+        f"{name} states the null without the MDE nearby:\n  " + "\n  ".join(orphans)
+    )
+
+
+# --- 5. the sign flip's two sentences travel together -----------------------------
+
+_FLIP = re.compile(r"sign\s+flip|SIGN\s+FLIPPED|flips?\s+the\s+sign", re.IGNORECASE)
+_FLIP_CONTEXT = re.compile(
+    r"already\s+spans?\s+zero|-?0\.10\s*pp|consistent\s+with\s+the\s+headline",
+    re.IGNORECASE,
+)
+
+
+@pytest.mark.parametrize("name", _present_results())
+def test_the_sign_flip_never_appears_without_its_magnitude_context(name):
+    """Both sentences are true and neither may appear alone.
+
+    'A sign flip occurred, which the pre-registration calls falsifying' without
+    the magnitude overstates it. The magnitude without the flip buries it.
+    """
+    orphans = _near(_read(name), _FLIP, _FLIP_CONTEXT)
+    assert not orphans, (
+        f"{name} mentions the sign flip without the context that it is a -0.10 pp "
+        f"swing on an interval already spanning zero:\n  " + "\n  ".join(orphans)
+    )
+
+
+def test_the_near_miss_guard_actually_rejects_the_phrasing():
+    """Guards the guard: a pattern list that matches nothing passes everything."""
+    text = "The result was trending positive at +1.45 pp."
+    hits = [p for p in _NEAR_MISS if re.search(p, text, re.IGNORECASE)]
+    assert hits, "the near-miss patterns do not match the phrasing they forbid"
+
+
+def test_a_disavowed_near_miss_is_permitted():
+    """VIDEO.md and CLAUDE.md name these phrasings in order to forbid them."""
+    text = 'Never say "trending positive" — the interval spans zero.'
+    match = re.search(r"trending\s+positive", text, re.IGNORECASE)
+    assert _is_disavowed(text, match.start(), match.end())
+
+
+def test_no_pattern_in_this_module_holds_a_literal_backspace():
+    """Runs the module-wide check as a test, so it cannot be skipped at import."""
+    _assert_no_literal_backspaces()

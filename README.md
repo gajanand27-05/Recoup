@@ -97,37 +97,76 @@ configuration.
 
 ### Recovery lift — the headline
 
-**Run 2026-09-03 · N = 2,000 as pre-registered · `sim` transport.**
+**The experiment did not detect a difference.**
 
 | arm | recovered | n | rate |
 |---|---|---|---|
 | control | 310 | 1,035 | 29.95% |
 | treatment | 303 | 965 | 31.40% |
 
-**Difference +1.45 pp · 95% CI [−2.59, +5.49] pp · p = 0.4830 · MDE 6.24 pp**
+**+1.45 pp · 95% CI [−2.59, +5.49] pp · p = 0.4830 · MDE 6.24 pp · N = 2,000**
 
-**The interval spans zero. This run does not distinguish the agent from the control.**
+The interval spans zero. An observed +1.45 pp sits well inside what a design powered for
+6.24 pp can resolve.
 
-That is the result, reported as pre-registered in [`EXPERIMENT.md`](EXPERIMENT.md) Addendum 3 —
-written at 12 of 2,000 subscriptions, before any number existed, precisely so this outcome
-could not be described afterwards as "trending positive". An effect of +1.45 pp is well inside
-what a 6.24 pp MDE can resolve. The experiment did not detect a difference; that is not the
-same as there being none.
+**That is not the same as there being no difference.** This run rules out effects *larger* than
+the MDE at the stated power. It does **not** rule out a real effect smaller than 6.24 pp, and it
+does **not** establish that the two arms are equivalent — a null result and a demonstration of
+equivalence are different claims, and only the first was run.
 
-**The usual excuse is unavailable here.** Addendum 2 fixed in advance that schema violations
-pull measured lift toward null. The fallback rate was **0.0%** across 3,637 model decisions, so
-that bias is nil rather than small — and the counter was verified to still be counting *before*
-this figure existed (A-027).
+#### The control was made strong on purpose, before any number existed
 
-**One sign flip, reported.** `attempt_decay_compounding` at the low end of its declared range
-takes the lift to −0.10 pp. `EXPERIMENT.md` pre-registers a flip as falsifying, so it is stated
-rather than narrowed away — in context, a −0.10 pp swing against a measurement whose interval
-already spans zero is consistent with the headline finding rather than a reversal of a real one.
+A null against a strawman is worthless. A null against a competent process is a finding, and
+this distinction is the reason the result is worth reporting at all.
 
-**The figure is pinned to three commits**, not one: the run spans `487fc45`, `7dbe2c0` and
-`25ad9c4` across two resumes forced by a provider quota and one network timeout. The pins and
-the three concurrency settings were *demonstrated* output-equivalent — the batch was re-run
-under each and every ledger row compared identical. See `runs/batch-2000.provenance.json`.
+The control arm was strengthened during Task 18 (A-021), **before any lift figure existed**:
+the schedule was front-loaded from `(0, 2, 5, 9, 14)` to `(0, 2, 4, 7, 10)` after measuring it
+against the frozen curve, it stops the moment the customer pays, and it uses the full five
+attempts `STOP-001` permits. Two *tighter* schedules scored higher still and are recorded in
+`baseline/fixed.py` rather than quietly discarded.
+
+So the finding is: **an LLM agent choosing template, channel and timing did not beat a
+well-tuned fixed schedule on this cohort.** That is a useful thing to know, and it says the
+decisioning is not where the value is.
+
+#### The ordering is the evidence
+
+Each of these was fixed *before* the thing it constrains, and the git history is what makes
+that checkable rather than assertable:
+
+| when | what |
+|---|---|
+| at 12 of 2,000 subscriptions | all three outcome rules pre-registered ([`EXPERIMENT.md`](EXPERIMENT.md) Addendum 3) — including that a control win would be reported as the result |
+| before the batch | schema violations declared to pull lift **toward null** (Addendum 2) |
+| before the figure existed | fallback counter verified live by five forced schema violations, each driving it 0% → 100% (A-027) |
+| after the run | fallback rate **0.0%** across 3,637 model decisions |
+
+Because the violation rate is zero, the toward-null bias is **nil, not small** — so the one
+excuse that could have argued the true effect is larger than measured is unavailable, and it
+was made unavailable in advance rather than after seeing the number.
+
+#### One sign flip, reported as pre-registered
+
+`attempt_decay_compounding` at the low end of its declared range takes the lift to **−0.10 pp**.
+[`EXPERIMENT.md`](EXPERIMENT.md) pre-registers a sign flip as falsifying, so it is stated rather
+than narrowed away.
+
+And the second half, which travels with it: **this is a −0.10 pp swing on a measurement whose
+interval already spans zero**, so it is consistent with the headline finding rather than the
+reversal of a real effect. Both sentences are true; neither is reported without the other.
+
+`self_recovery_rate_soft` and `self_recovery_rate_hard` are **declared NOT SWEPT**. They define
+`would_self_recover` and therefore the denominator of the whole claim, and a sweep that replays
+fixed actions cannot reach scenario generation. Reporting them as swept-and-flat would be the
+most reassuring possible result in the emptiest possible place.
+
+#### Provenance
+
+Pinned to **three commits** — `487fc45` (1–1153), `7dbe2c0` (1154–1354), `25ad9c4` (1355–2000)
+— across two resumes forced by a provider account quota and one network timeout, at three
+concurrency settings. The pins and settings were **demonstrated** output-equivalent, not
+argued: the batch was re-run under each and every ledger row compared identical. See
+`runs/batch-2000.provenance.json`.
 
 ### Reply understanding — measured
 
@@ -179,6 +218,41 @@ The pins were shown to be output-equivalent rather than argued to be: the batch 
 both, and under concurrency 1, 2 and 4, and every ledger row compared identical. Draws are keyed
 on `(seed, subscription_id, attempt_no, day_offset)` rather than taken from a shared RNG, which
 is what makes concurrency-invariance demonstrable instead of hopeful.
+
+### The ledger cannot reconstruct its own run
+
+A hash-chained append-only ledger that cannot replay itself is a boundary of the instrument,
+not a bug in the replay. Stated because a reader who understands ledgers will ask.
+
+Of the five fields a faithful replay needs, **two are stored and three are not**:
+
+| field | where it comes from |
+|---|---|
+| `channel`, `attempt_no` | the row's payload ✅ |
+| `day_offset` | **derived** from the row's `ts`, relative to that subscription's first row |
+| `is_hard_decline` | **regenerated** from `(n, seed)` — a property of the scenario, not of the action |
+| `amount_paise` | **not stored anywhere** |
+| `reason_code`, `send_at` | not stored |
+
+Every derivation is a place a reconstruction can silently diverge, and one did: the sensitivity
+sweep's first run defaulted `day_offset` and `is_hard_decline`, produced a baseline of −2.02 pp
+against a measured +1.45, and rendered **five false "SIGN FLIPPED" verdicts** — headed for the
+falsification section. It was caught only because the baseline disagreed with the known figure.
+`verify_replay_reproduces()` now refuses to sweep a replay that does not reproduce the run
+(INC-013).
+
+**The blast radius, unsoftened.** `scripts/report.py` built every view with one flat
+`amount_paise` of 49,900 across all 2,000 subscriptions. The cohort's real amounts run from
+₹299 to ₹4,999 — **correct for 506 subscriptions and wrong for 1,494.**
+
+The headline recovery rate counts *subscriptions*, so **+1.45 pp never depended on it.** The
+recovered-amount difference and its bootstrap interval did, and were wrong. They were not
+rendered in the report — **which is luck, not a control.** Nothing prevented them from being
+rendered; they simply were not. Amounts are now regenerated per subscription, and any that
+cannot be are counted and reported with the consequence stated.
+
+Not fixed by widening the payload: the batch has run, and adding fields now would change the
+hash chain's contents for a completed run already pinned to three commits.
 
 ### The schema is requested, not enforced
 
