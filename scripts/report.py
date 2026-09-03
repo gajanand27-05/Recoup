@@ -153,9 +153,19 @@ def main() -> int:
 
     checkpoint = REPO / "runs" / "checkpoints" / f"{args.run_id}.jsonl"
     windows = fallback_series(read_checkpoint(checkpoint))
-    if windows:
-        say("## Fallback rate over the run")
+    say("## Fallback rate over the run")
+    say()
+    if not windows:
+        # SAYS SO rather than skipping. A section that silently disappears when
+        # its input is missing looks identical to a report that had nothing to
+        # say about it — and this one carries the toward-null bias argument.
+        say(f"**NOT AVAILABLE.** No checkpoint at `{checkpoint}`, so the "
+            f"per-window series could not be computed. The fallback rate for the "
+            f"run as a whole is in the per-arm table above; what is missing is "
+            f"whether it was constant or drifted, which is what the "
+            f"toward-null bias argument needs.")
         say()
+    if windows:
         say("Not a closing figure. 5% overall is consistent with 5% throughout and")
         say("with 1% rising to 12%, and those are different claims about the")
         say("toward-null bias. Windows are SUBMISSION-index ranges, not completion")

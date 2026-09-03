@@ -291,3 +291,80 @@ def test_a_partial_run_reports_a_worse_mde_than_the_design():
     partial = mde_at_n(BASELINE_P1, 576)
     assert partial > full
     assert round(partial * 100, 2) == 8.18
+
+
+# --- the report's own sections must have been RENDERED at least once ----------------
+
+
+def test_every_report_section_renders_for_a_completed_run(tmp_path):
+    """A guard whose subject does not exist has never been shown to fire, and two
+    of the report's five sections had never rendered at all.
+
+    `## The model` and `## Per arm` are gated on a run SUMMARY, which only exists
+    when a batch completes — and no batch had. They were checked by reading the
+    code. This builds a completed run and renders it.
+    """
+    import json
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    from recoup.batch.runner import BatchRunner
+    from recoup.execute.sim import SimTransport
+
+    class _LLM:
+        name = "gpt-oss:120b"
+
+        def classify_reply(self, text, today):  # pragma: no cover
+            raise AssertionError("wrong role")
+
+        def propose_action(self, system, prompt):
+            return {
+                "action_type": "send_message",
+                "template_id": "TPL_RECOUP_WA_001",
+                "hours_from_now": 0,
+                "variables": {},
+                "rationale": "x",
+            }
+
+    repo = Path(__file__).resolve().parents[1]
+    db = tmp_path / "r.db"
+    runner = BatchRunner(
+        db_path=str(db), rules_path=str(repo / "src" / "recoup" / "policy" / "rules.yaml"),
+        run_id="rep", seed=99, transport=SimTransport(seed=99),
+        llm_client=_LLM(), checkpoint_dir=str(tmp_path / "cp"),
+    )
+    summary = runner.run(60, progress_every=0)
+    summary.model_identity = {
+        "model_id": "gpt-oss:120b", "digest": "d98fe6ba01e6",
+        "confirmation": "CONFIRMED_BY_REGISTRY",
+    }
+    db.with_suffix(".summary.json").write_text(
+        json.dumps(summary.__dict__, indent=2, default=str), encoding="utf-8"
+    )
+
+    result = subprocess.run(
+        [sys.executable, str(repo / "scripts" / "report.py"),
+         "--run-id", "rep", "--db", str(db)],
+        capture_output=True, text=True, cwd=repo,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    out = result.stdout
+
+    for heading in ("## The model", "## Per arm", "## Fallback rate over the run",
+                    "## Recovery lift", "## Completeness"):
+        assert heading in out, (
+            f"the report did not render {heading!r} for a COMPLETED run:\n{out[:1500]}"
+        )
+
+    assert "CONFIRMED_BY_REGISTRY" in out
+    assert "n/a" in out, "the control arm's fallback rate rendered as a number"
+
+
+def test_a_missing_checkpoint_says_so_rather_than_dropping_the_section(tmp_path):
+    """The section carries the toward-null bias argument. Silently vanishing
+    looks identical to a report that had nothing to say about it."""
+    from recoup.batch.series import fallback_series, read_checkpoint
+
+    assert read_checkpoint(tmp_path / "absent.jsonl") == []
+    assert fallback_series([]) == []
