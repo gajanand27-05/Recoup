@@ -1,0 +1,46 @@
+{
+  "run_id": "batch-2000",
+  "n": 2000,
+  "seed": 20260902,
+  "horizon_days": 15,
+  "model_identity": {
+    "model_id": "gpt-oss:120b",
+    "confirmation": "CONFIRMED_BY_REGISTRY",
+    "digest": "d98fe6ba01e6",
+    "size_bytes": 65290180781,
+    "modified_at": "2025-08-05T00:00:00Z",
+    "parameter_count": 116829156672,
+    "quantization": "MXFP4",
+    "captured_at": "2026-09-03T06:00:56.299330Z",
+    "note": ""
+  },
+  "arms": {
+    "control": {
+      "subscriptions": 1035,
+      "actions_proposed": 4353,
+      "actions_sent": 4353,
+      "actions_vetoed": 0,
+      "replans": 0,
+      "model_decided": 0,
+      "fallbacks": 0,
+      "recovered": 310,
+      "recovered_paise": 31229000,
+      "spend_paise": 52236
+    },
+    "treatment": {
+      "subscriptions": 965,
+      "actions_proposed": 6579,
+      "actions_sent": 3637,
+      "actions_vetoed": 474,
+      "replans": 0,
+      "model_decided": 3637,
+      "fallbacks": 0,
+      "recovered": 303,
+      "recovered_paise": 27839700,
+      "spend_paise": 43845
+    }
+  },
+  "started_at": "2026-09-03T06:00:57.777594Z",
+  "finished_at": "2026-09-03T09:03:00.975622Z",
+  "resumed_from": 1354
+}

@@ -35,6 +35,20 @@ runs/
 runs/*
 !runs/*.provenance.json
 
+# ...AND the measured run's ledger, for the same reason one step further.
+# README's third claim is "every number is recomputable from this repository",
+# and a judge who cloned this and ran `recoup verify-ledger` got `rows checked: 0`
+# and a genesis head of 64 zeros, because the ledger the claim rests on was not
+# here. An audit trail that does not ship is not an audit trail.
+#
+# 5.7 MB. It is the artifact every reported figure is recomputed from -- the lift,
+# the completeness count, the head hash shown on camera -- and shipping it is what
+# turns that claim from an assertion into something a stranger can check in one
+# command. The summary rides along so the per-arm counts can be compared against
+# what replay() finds, which is the INC-009 cross-check.
+!runs/batch-2000.db
+!runs/batch-2000.summary.json
+
 # ---------------------------------------------------------------------------
 # Python
 # ---------------------------------------------------------------------------
