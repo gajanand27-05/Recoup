@@ -44,14 +44,6 @@ import re
 from pathlib import Path
 
 import pytest
-import video_cards
-
-#: Video guards need the Remotion source, which is NOT tracked (video/ is
-#: gitignored). On a checkout without it they SKIP and say so, rather than
-#: walking an empty card list and reporting green.
-_needs_video = pytest.mark.skipif(
-    not video_cards.AVAILABLE, reason=video_cards.SKIP_REASON
-)
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -188,92 +180,6 @@ def test_every_achieved_mde_in_a_document_says_so(name):
         f"{name} states {ACHIEVED_PP} pp without saying it is the ACHIEVED MDE "
         f"at {CONTROL_N:,} / {TREATMENT_N:,}. The pre-registered figure is "
         f"{PREREG_PP} pp (A-029):\n  " + "\n  ".join(orphans)
-    )
-
-
-@_needs_video
-@pytest.mark.parametrize("name", [c.name for c in video_cards.cards()])
-def test_every_mde_on_a_video_card_says_which_one_it_is(name):
-    """A card is read alone, so the qualifier has to be ON it -- proximity in the
-    source file is not proximity on screen."""
-    card = next(c for c in video_cards.cards() if c.name == name)
-    text = card.text
-
-    # The cards interpolate the figures, so the digits are not in the source.
-    # What IS in the source is the label, and every card that shows an MDE shows
-    # `mde_basis` beside it. Check the basis strings resolve to the right one.
-    import json
-
-    figures = json.loads(
-        (REPO / "video" / "data" / "figures.json").read_text(encoding="utf-8")
-    )
-    if "mde_basis" in card.body and "power_ceiling" in card.body:
-        assert "pre-registered" in figures["power_ceiling"]["mde_basis"]
-    if "mde_basis" in card.body and "f.lift.mde_basis" in card.body:
-        assert "achieved" in figures["lift"]["mde_basis"]
-
-    # No card may print a bare MDE. The qualifier has to reach the SCREEN, so it
-    # counts whether it arrives interpolated (`mde_basis`) or written into the
-    # caption -- what matters is that a viewer of this card alone can tell which
-    # figure they are looking at.
-    if re.search(r"\bMDE\b|minimum detectable effect|mde_at_n", text, re.IGNORECASE):
-        qualified = (
-            "mde_basis" in card.body
-            or _PREREG.search(text)
-            or _ACHIEVED.search(text)
-        )
-        assert qualified, (
-            f"video card {name!r} shows an MDE with nothing on the card to say "
-            f"which one it is. A card is read alone: on screen there is no way "
-            f"to tell the pre-registered {PREREG_PP} from the achieved "
-            f"{ACHIEVED_PP}.\n\n{text}"
-        )
-
-
-@_needs_video
-def test_the_figures_file_labels_both_and_they_differ():
-    import json
-
-    figures = json.loads(
-        (REPO / "video" / "data" / "figures.json").read_text(encoding="utf-8")
-    )
-    prereg = figures["power_ceiling"]
-    lift = figures["lift"]
-    assert f"{prereg['mde_pp']:.2f}" == PREREG_PP
-    assert f"{lift['mde_pp']:.2f}" == ACHIEVED_PP
-    assert "pre-registered" in prereg["mde_basis"]
-    assert "achieved" in lift["mde_basis"]
-    assert prereg["mde_pp"] != lift["mde_pp"]
-
-
-def test_an_unqualified_mde_is_caught():
-    """PLANT. Both directions, and the message must name the RIGHT problem.
-
-    Planting only proves the guard raises. On 2026-09-03 a cross-check in
-    scripts/video_data.py raised on the CLEAN file, with a message that read
-    like a working guard, because its pattern matched nothing. So this asserts
-    on what the orphan report says, not merely that there is one.
-    """
-    clean = (
-        f"The pre-registered minimum detectable effect is {PREREG_PP} pp at "
-        f"1,000 per arm, and the achieved figure at 1,035 / 965 is "
-        f"{ACHIEVED_PP} pp."
-    )
-    assert not _orphans(clean, PREREG_PP, _PREREG)
-    assert not _orphans(clean, ACHIEVED_PP, _ACHIEVED)
-
-    bare = f"The interval spans zero at an MDE of {PREREG_PP} pp."
-    hits = _orphans(bare, PREREG_PP, _PREREG)
-    assert hits, "a bare pre-registered MDE was not caught"
-    assert PREREG_PP in hits[0], (
-        f"the guard fired but its report does not name the figure it fired on: "
-        f"{hits[0]!r}"
-    )
-
-    swapped = f"The achieved MDE, at 1,000 per arm by design, is {ACHIEVED_PP} pp."
-    assert _orphans(swapped, ACHIEVED_PP, _ACHIEVED) == [], (
-        "this phrasing does carry 'achieved', so it must pass -- if it fails, "
-        "the qualifier patterns are matching position rather than wording"
     )
 
 

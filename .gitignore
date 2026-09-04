@@ -77,3 +77,12 @@ video/.remotion/
 # test_claims_uncompressed and test_mde_labelling) SKIPS on a checkout without
 # it, so those run on the render machine and not in CI.
 video/
+
+# Video guards. They read video/, which is not tracked, so they cannot run for
+# anyone who clones this -- a shipped test that imports them fails on every clone.
+# Kept local, on the machine that renders. See tests/test_video_claims.py.
+tests/video_cards.py
+tests/test_video_claims.py
+tests/test_video_no_literals.py
+tests/test_render_provenance.py
+scripts/video_data.py
