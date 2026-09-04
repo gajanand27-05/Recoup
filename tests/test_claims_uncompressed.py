@@ -40,7 +40,7 @@ REPO = Path(__file__).resolve().parents[1]
 #: missing from it and that check is what found it.
 CANDIDATES = (
     "README.md", "EVAL_RESULTS.md", "EXPERIMENT.md", "VIDEO.md",
-    "SUBMISSION.md", "INCIDENTS.md", "SIMULATOR_FREEZE.md",
+    "SUBMISSION.md", "INCIDENTS.md", "SIMULATOR_FREEZE.md", "SOURCES.md",
 )
 
 #: ASSUMPTION: a qualifier this far from its number is still read as attached to
