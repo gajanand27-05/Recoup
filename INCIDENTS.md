@@ -935,8 +935,8 @@ default of 49,900 applied to all 2,000 subscriptions. The cohort's actual amount
 
 **The default was correct for 506 of 2,000 and wrong for 1,494.**
 
-The recovery *rate* counts subscriptions and is unaffected — the headline +1.45 pp figure never
-depended on it. What did depend on it: `recovered_paise`, the money difference, and its
+The recovery *rate* counts subscriptions and is unaffected — the headline +1.45 pp figure
+(`487fc45` / `7dbe2c0` / `25ad9c4`, see `runs/batch-2000.provenance.json`) never depended on it. What did depend on it: `recovered_paise`, the money difference, and its
 bootstrap interval. Those were computed over a constant that is not true of the cohort. They
 are not currently rendered in the report, which is the only reason this did not reach a reader.
 

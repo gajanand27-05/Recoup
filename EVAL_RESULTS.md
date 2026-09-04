@@ -95,6 +95,10 @@ That is a property of this model on this task and should not be assumed to hold 
 
 **Difference +1.45 pp · 95% CI [−2.59, +5.49] pp · p = 0.4830**
 
+*Produced by `487fc45` (subscriptions 1–1153), `7dbe2c0` (1154–1354) and `25ad9c4`
+(1355–2000) at concurrency 3 → 2 → 2, demonstrated output-equivalent. Full manifest:
+[`runs/batch-2000.provenance.json`](runs/batch-2000.provenance.json).*
+
 ### The result: no detected difference at this N
 
 **The interval spans zero.** This run does not distinguish the agent from the control, at an
@@ -112,7 +116,8 @@ Reported as pre-registered in [`EXPERIMENT.md`](EXPERIMENT.md) Addendum 3, writt
 this N, with the MDE stated* — **not** "trending positive", and **not** re-run at larger N to
 chase significance.
 
-The achieved MDE at N = 2,000 is **6.24 pp**. An effect of +1.45 pp is well inside the noise this design
+The achieved MDE at N = 2,000 is **6.24 pp**. An effect of +1.45 pp — produced by `487fc45`,
+`7dbe2c0` and `25ad9c4`, see `runs/batch-2000.provenance.json` — is well inside the noise this design
 can resolve, so the honest statement is that the experiment did not detect a difference. That
 is not the same as there being no difference: the run does **not** rule out a smaller real
 effect and does **not** establish that the arms are equivalent.
@@ -159,7 +164,7 @@ declared range.
 
 `EXPERIMENT.md` pre-registers a sign flip as falsifying, so it is reported rather than
 narrowed away. In context the flip is −0.10 pp against a measurement whose interval already
-spans zero at an achieved MDE of 6.24 pp, so it is consistent with the headline finding — which does
+spans zero at an achieved MDE of 6.24 pp, so it is consistent with finding 1 — which does
 not establish equivalence either — rather than a reversal of a real effect. Both statements
 are true and both are here.
 
@@ -223,8 +228,8 @@ Both arms ran identical policy. If the harness manufactured lift, it would appea
 
 **The A/A test passed** — and the next sentence is not optional. **Scope, which must travel
 with the result:** a pass rules out harness bias larger than about **6.23 percentage points**.
-It does **not** establish an unbiased harness. An effect smaller than 6.23 pp could be sitting
-in the harness and this test would not see it.
+It does **not** establish an unbiased harness. An effect smaller than the A/A's own 6.23 pp
+at 1,000 per arm could be sitting in the harness and this test would not see it.
 
 *(Stated as a verdict rather than left to be inferred from p = 0.8932. Until 2026-09-02 this
 section gave the numbers and never said "passed", so the only document stating the result was

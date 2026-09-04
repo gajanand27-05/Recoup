@@ -101,7 +101,8 @@ configuration.
 
 ## Finding 1 — the agent did not beat the control
 
-**The experiment did not detect a difference.**
+**The experiment did not detect a difference — which is not the same as there being no
+difference, and does not establish that the arms are equivalent.**
 
 | arm | recovered | n | rate |
 |---|---|---|---|
@@ -109,6 +110,10 @@ configuration.
 | treatment | 303 | 965 | 31.40% |
 
 **+1.45 pp · 95% CI [−2.59, +5.49] pp · p = 0.4830 · achieved MDE 6.24 pp · N = 2,000**
+
+*Produced by `487fc45` (subscriptions 1–1153), `7dbe2c0` (1154–1354) and `25ad9c4`
+(1355–2000) at concurrency 3 → 2 → 2, demonstrated output-equivalent. Full manifest:
+[`runs/batch-2000.provenance.json`](runs/batch-2000.provenance.json).*
 
 The interval spans zero. An observed +1.45 pp sits well inside what this run, powered for
 6.24 pp at the arms it actually produced, can resolve.
@@ -131,7 +136,7 @@ against the frozen curve, it stops the moment the customer pays, and it uses the
 attempts `STOP-001` permits. Two *tighter* schedules scored higher still and are recorded in
 `baseline/fixed.py` rather than quietly discarded.
 
-So the finding is: **an LLM agent choosing template, channel and timing did not beat a
+So finding 1 is: **an LLM agent choosing template, channel and timing did not beat a
 well-tuned fixed schedule on this cohort.** That is a useful thing to know, and it says the
 decisioning is not where the value is.
 
@@ -158,7 +163,7 @@ was made unavailable in advance rather than after seeing the number.
 than narrowed away.
 
 And the second half, which travels with it: **this is a −0.10 pp swing on a measurement whose
-interval already spans zero**, so it is consistent with the headline finding rather than the
+interval already spans zero**, so it is consistent with finding 1 rather than the
 reversal of a real effect. Both sentences are true; neither is reported without the other.
 
 `self_recovery_rate_soft` and `self_recovery_rate_hard` are **declared NOT SWEPT**. They define
@@ -299,12 +304,15 @@ removed from it.
 
 ### The figure is pinned to the code that produced it, which is not always HEAD
 
-A long-running batch executes the version it loaded. This run spans two commits and three
-concurrency settings across two resumes, recorded in `runs/batch-2000.provenance.json` with the
-subscription range each produced — the figure is pinned to a *set*, not a commit.
+A long-running batch executes the version it loaded. This run spans **three commits** across
+two provider-quota resumes and one network timeout (INC-012), recorded in
+`runs/batch-2000.provenance.json` with the subscription range each **produced** — 1–1153,
+1154–1354 and 1355–2000, which partition 1–2,000 exactly. The figure is pinned to a *set*, not
+a commit. The manifest separately records what each pin was *launched to cover*, which is not
+the same thing: `7dbe2c0` was launched to finish the run and died at 1354.
 
 The pins were shown to be output-equivalent rather than argued to be: the batch was run under
-both, and under concurrency 1, 2 and 4, and every ledger row compared identical. Draws are keyed
+each, and under concurrency 1, 2 and 4, and every ledger row compared identical. Draws are keyed
 on `(seed, subscription_id, attempt_no, day_offset)` rather than taken from a shared RNG, which
 is what makes concurrency-invariance demonstrable instead of hopeful.
 
@@ -334,7 +342,8 @@ falsification section. It was caught only because the baseline disagreed with th
 `amount_paise` of 49,900 across all 2,000 subscriptions. The cohort's real amounts run from
 ₹299 to ₹4,999 — **correct for 506 subscriptions and wrong for 1,494.**
 
-The headline recovery rate counts *subscriptions*, so **+1.45 pp never depended on it.** The
+The headline recovery rate counts *subscriptions*, so **+1.45 pp** — the figure produced by
+`487fc45` / `7dbe2c0` / `25ad9c4` — **never depended on it.** The
 recovered-amount difference and its bootstrap interval did, and were wrong. They were not
 rendered in the report — **which is luck, not a control.** Nothing prevented them from being
 rendered; they simply were not. Amounts are now regenerated per subscription, and any that
