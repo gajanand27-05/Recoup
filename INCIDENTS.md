@@ -964,3 +964,76 @@ verified in `replay_actions_from_ledger()` rather than left implicit at each cal
 Ask of any append-only record: *could this run be replayed from this alone?* Where the answer
 is no, the missing fields are the places a future reconstruction will quietly differ — and a
 reconstruction that differs still renders a table.
+
+---
+
+## INC-014 — The submission video's headline number was wrong, on the first card
+
+**2026-09-04 18:47 IST** · severity: critical (a fabricated figure, in the artifact a judge
+watches first) · status: fixed
+
+**What happened**
+
+`video/out/recoup.mp4`, rendered at 18:39 today, opened with:
+
+```
+1. The agent did not beat the control: +9.99 pp, 95% CI
+   [-2.59, 5.49] pp. The interval spans zero ...
+```
+
+**The lift is +1.45 pp** — produced by `487fc45`, `7dbe2c0` and `25ad9c4`, per
+`runs/batch-2000.provenance.json`. The interval beside it was correct, which is what makes this the
+worst shape available: a wrong point estimate flanked by a right interval reads as a
+measurement rather than as an error. It is the opening card. A judge who watches ten seconds
+sees this number and nothing else.
+
+**How it was found**
+
+By extracting frames from the artifact and reading them, rather than trusting that a render
+had happened. That is the rule added to `CLAUDE.md` on 2026-09-03 after a puppeteer timeout
+left a stale MP4 in place — written for the case where the file does not change, and it caught
+the opposite case, where the file did.
+
+**What was NOT wrong**
+
+- `video/data/figures.json` — regenerated from `scripts/video_data.py` and byte-identical to
+  the committed file, `diff_pp: 1.45`. Two producers, agreeing.
+- `video/src/Recoup.tsx` — interpolates `pp(f.lift.diff_pp)`. No literal.
+- The suite — 1,082 passed. Every guard was green throughout.
+
+**Cause: not determined, and recorded as undetermined rather than guessed**
+
+Neither input's mtime had moved: `figures.json` last written 2026-09-03 22:17, `Recoup.tsx`
+22:48. The 18:39 render was not made by this session. What produced a frame reading 9.99 from
+inputs that say 1.45 is unexplained, and inventing an explanation here would be exactly the
+thing this log exists to prevent.
+
+**The gap it exposes, which is the part worth keeping**
+
+Every guard in this repository checks the **source** or the **data**.
+`tests/test_video_no_literals.py` proves no number is typed into a caption;
+`tests/test_mde_labelling.py` proves both MDEs are labelled; `scripts/video_data.py` proves
+each figure came from the module that computes it. **Nothing checked the rendered artifact.**
+A video is the one output nobody can grep, and it was the only output with no consumer-side
+read — the INC-009 shape moved one layer out, from ledger-writer versus ledger-reader to
+source versus render.
+
+**Fix**
+
+Re-rendered from committed sources. Verified as the rule requires — by the artifact, not the
+exit path: sha256 `4c63a2d7…` → `572831984d…`, size 14,024,263 → 14,020,805 bytes, geometry
+unchanged at 4,680 frames / 156.05 s / 1920x1080, and frames sampled at 0:10, 0:26, 1:02 and
+2:26 read `+1.45 pp`, `the pre-registered 6.23 pp`, the strengthened control, and the three
+code pins with the ranges they produced.
+
+`video/build-provenance.json` now records the sha256 of the artifact and of every input that
+feeds it, and `tests/test_render_provenance.py` fails when a recorded input hash stops matching
+the committed file — so a render that predates its own sources says so instead of sitting there
+looking current.
+
+**Lesson kept**
+
+An artifact nobody reads back is an artifact nobody is checking. "Verify mtime and content"
+was already the rule; the missing half is that *content* means opening the thing and looking at
+what it says, with the consumer's own eyes — which for a video means sampling frames, and for
+anything else means the reader the audience actually uses.

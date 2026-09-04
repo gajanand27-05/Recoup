@@ -230,6 +230,7 @@ def test_every_mde_on_a_video_card_says_which_one_it_is(name):
         )
 
 
+@_needs_video
 def test_the_figures_file_labels_both_and_they_differ():
     import json
 
