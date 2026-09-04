@@ -50,6 +50,15 @@ SEED = 20260902
 INTENT_CORRECT, INTENT_N = 49, 52
 DATE_CORRECT, DATE_N = 10, 11
 
+#: MEASURED 2026-09-02, Task 21's adversarial eval, INC-010. The hole is fixed,
+#: so `SLOT_ESCAPES` cannot be recomputed from the code as it now stands — it is
+#: a fact about the version that had it. Recorded here, next to its provenance,
+#: rather than typed into a caption where nobody could find where it came from.
+#: The payload COUNT is not recorded here: it is read from the fixture file
+#: below, so adding an attack updates the video rather than dating it.
+SLOT_ESCAPES = 8
+ADVERSARIAL_FIXTURE = REPO / "tests" / "fixtures" / "adversarial_replies.jsonl"
+
 #: MEASURED 2026-08-31, the component A/A. Run once; not re-run (EXPERIMENT.md).
 AA_A, AA_B, AA_N_PER_ARM = 513, 510, 1000
 
@@ -167,6 +176,21 @@ def main() -> int:
     mde_pp = round(mde_at_n(BASELINE_P1, harmonic) * 100, 2)
     prereg_mde_pp = _preregistered_mde_pp()
 
+    # The count comes from the fixture the eval actually loads. A number typed
+    # here would agree with it today and diverge the moment an attack is added,
+    # which is the same defect as a literal in a caption with one more step.
+    payloads = sum(
+        1 for line in ADVERSARIAL_FIXTURE.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    )
+    if payloads < SLOT_ESCAPES:
+        raise SystemExit(
+            f"{ADVERSARIAL_FIXTURE.name} holds {payloads} payloads, fewer than the "
+            f"{SLOT_ESCAPES} recorded as having escaped through the variable slot. "
+            f"The card would read '{SLOT_ESCAPES} of {payloads}', which is not a "
+            f"proportion. One of the two numbers is wrong."
+        )
+
     intent_lo, intent_hi = wilson_interval(INTENT_CORRECT, INTENT_N)
     date_lo, date_hi = wilson_interval(DATE_CORRECT, DATE_N)
 
@@ -242,6 +266,11 @@ def main() -> int:
         "aa": {
             "a": AA_A, "b": AA_B, "n_per_arm": AA_N_PER_ARM,
             "bound_pp": round(mde_at_n(BASELINE_P1, AA_N_PER_ARM) * 100, 2),
+        },
+        "adversarial": {
+            "payloads": payloads,
+            "slot_escapes": SLOT_ESCAPES,
+            "only_rule": "DLT-008",
         },
         "completeness": {
             "ledger_rows": len(rows),

@@ -69,3 +69,11 @@ desktop.ini
 video/node_modules/
 video/out/
 video/.remotion/
+
+# The Remotion project. The rendered video is uploaded to YouTube and linked
+# from the form; the source went with it on 2026-09-04 at the builder's
+# instruction. Consequence, stated rather than discovered later: every video
+# guard (test_video_no_literals, test_render_provenance, the video half of
+# test_claims_uncompressed and test_mde_labelling) SKIPS on a checkout without
+# it, so those run on the render machine and not in CI.
+video/

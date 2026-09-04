@@ -1,3 +1,0 @@
-$ recoup report --run-id run-demo-real
-
-ValueError: refusing to pool run 'run-demo-real': 3 real and 47 simulated rows are present. These are never pooled: report them separately or the figure mixes a real outcome with a modelled one. Report per transport, or state the split explicitly. If this run is not finished, use summarise() rather than relaxing this check.

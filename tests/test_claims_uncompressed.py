@@ -524,6 +524,13 @@ def test_the_result_files_are_a_subset_of_the_candidates():
 
 import video_cards  # noqa: E402
 
+#: Video guards need the Remotion source, which is NOT tracked (video/ is
+#: gitignored). On a checkout without it they SKIP and say so, rather than
+#: walking an empty card list and reporting green.
+_needs_video = pytest.mark.skipif(
+    not video_cards.AVAILABLE, reason=video_cards.SKIP_REASON
+)
+
 _SPANS_ZERO = re.compile(r"(?:interval\s+)?spans\s+zero", re.IGNORECASE)
 
 
@@ -531,6 +538,7 @@ def _cards_asserting_the_interval_spans_zero(cards):
     return [c for c in cards if _SPANS_ZERO.search(c.text)]
 
 
+@_needs_video
 @pytest.mark.parametrize("name", [c.name for c in video_cards.cards()])
 def test_a_video_card_never_says_spans_zero_without_the_non_equivalence_clause(name):
     card = next(c for c in video_cards.cards() if c.name == name)
@@ -544,6 +552,7 @@ def test_a_video_card_never_says_spans_zero_without_the_non_equivalence_clause(n
     )
 
 
+@_needs_video
 def test_at_least_one_video_card_actually_makes_the_spans_zero_claim():
     """A test that passes by finding nothing must first be shown able to find
     something. If no card asserts it, the guard above skips every scene and is
@@ -556,6 +565,7 @@ def test_at_least_one_video_card_actually_makes_the_spans_zero_claim():
     )
 
 
+@_needs_video
 def test_the_pairing_guard_rejects_a_card_with_the_clause_stripped():
     """PLANT. Strips the non-equivalence clause out of the opening card and
     confirms the guard fires, rather than reasoning that it would.
@@ -587,6 +597,7 @@ def test_the_pairing_guard_rejects_a_card_with_the_clause_stripped():
     )
 
 
+@_needs_video
 def test_the_scenes_array_and_the_defined_scenes_agree():
     """Walk the registry, do not enumerate it. A scene defined but never placed
     in SCENES renders nothing and would satisfy every guard above for free; a

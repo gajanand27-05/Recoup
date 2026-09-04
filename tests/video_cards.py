@@ -38,6 +38,20 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 SOURCE = REPO / "video" / "src" / "Recoup.tsx"
 
+#: The Remotion project is NOT tracked -- `video/` is gitignored, so a fresh
+#: clone (and therefore CI) has no source to parse. Every guard that reads a
+#: card must skip explicitly rather than quietly find nothing: a check that
+#: passes over an empty set is indistinguishable from one that checked, which is
+#: this build's own defect class pointed at its own test suite.
+AVAILABLE = SOURCE.exists()
+
+SKIP_REASON = (
+    "video/ is not tracked, so the Remotion source is absent on this checkout. "
+    "These guards run on the machine that renders the video and NOT in CI -- "
+    "the render is the only place they can run, and that is stated rather than "
+    "hidden behind a green suite."
+)
+
 #: Stands in for an interpolated expression. Chosen so it contains no digits and
 #: no prose -- it must not accidentally satisfy either guard that reads it.
 INTERPOLATION = "\x00"
@@ -91,7 +105,14 @@ def declared_scene_order() -> list[str]:
 
 
 def cards(text: str | None = None) -> list[Card]:
-    """Every `React.FC` scene in the source, with its displayed strings."""
+    """Every `React.FC` scene in the source, with its displayed strings.
+
+    Returns an empty list when the source is absent so that COLLECTION does not
+    error -- the consuming modules carry a skipif on `AVAILABLE`, which is what
+    turns "nothing to check" into a stated skip rather than a silent pass.
+    """
+    if text is None and not AVAILABLE:
+        return []
     body = text if text is not None else source()
     found: list[Card] = []
     marks = list(_SCENE.finditer(body))

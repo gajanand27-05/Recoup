@@ -49,6 +49,12 @@ from pathlib import Path
 import pytest
 import video_cards
 
+#: The whole module reads the Remotion source, which is not tracked. It runs
+#: on the machine that renders the video and NOT in CI -- stated, not hidden.
+pytestmark = pytest.mark.skipif(
+    not video_cards.AVAILABLE, reason=video_cards.SKIP_REASON
+)
+
 REPO = Path(__file__).resolve().parents[1]
 FIGURES = REPO / "video" / "data" / "figures.json"
 
@@ -125,6 +131,13 @@ EXEMPT: tuple[tuple[str, str], ...] = (
     (
         r"\b1\. |\b2\. ",
         "The list numbering on the opening card. Not a quantity.",
+    ),
+    (
+        r"\bDLT-0\d\d\b|\bmsg91\.com\b",
+        "A rule id and the host of its source_url, both copied verbatim from "
+        "src/recoup/policy/rules.yaml, which is the record the card is showing. "
+        "Identifiers, not measurements: nothing on that card is a quantity, and "
+        "the rule's own veto text reaches the screen only through captured.json.",
     ),
 )
 
