@@ -216,14 +216,18 @@ def test_a_new_literal_figure_is_caught():
     This is the literal that shipped and was found by looking at a frame. The
     plant runs on every check so the guard cannot quietly stop covering it.
     """
+    # Plant by substituting the INTERPOLATION for the value it resolves to,
+    # rather than by matching a sentence. The first version quoted the Day 2
+    # caption verbatim and went stale the moment that caption was reworded --
+    # caught by its own staleness assertion, which is the only reason this is
+    # not now a plant that silently matches nothing.
+    figures = json.loads(FIGURES.read_text(encoding="utf-8"))
+    literal = f"{figures['power_ceiling']['mde_pp']}"
     text = video_cards.source()
-    planted = text.replace(
-        "`Task 8. mde_at_n() has returned ${f.power_ceiling.mde_pp} pp for just as long. The gap`",
-        '"Task 8. mde_at_n() has returned 6.23 pp for just as long. The gap"',
-    )
+    planted = text.replace("${f.power_ceiling.mde_pp}", literal)
     assert planted != text, (
-        "the plant no longer matches the Day 2 card, so this guard has not been "
-        "shown to fire against the defect it exists for"
+        "the Day 2 card no longer interpolates f.power_ceiling.mde_pp, so this "
+        "guard has not been shown to fire against the defect it exists for"
     )
 
     card = next(c for c in video_cards.cards(planted) if c.name == "DayTwo")

@@ -107,8 +107,8 @@ const DayTwo: React.FC = () => (
         // the PRE-REGISTERED MDE, not aa.bound_pp. Numerically identical because
         // both sit at 1,000 per arm, but that one is the A/A's own power: right
         // number, wrong provenance, and it would have followed the A/A's N (A-029).
-        `Task 8. mde_at_n() has returned ${f.power_ceiling.mde_pp} pp for just as long. The gap`,
-        "is arithmetic over numbers that were already committed.",
+        `Task 8. mde_at_n() has returned the pre-registered ${f.power_ceiling.mde_pp} pp`,
+        "for just as long. The gap is arithmetic over numbers already committed.",
       ]}
       delay={8}
     />
